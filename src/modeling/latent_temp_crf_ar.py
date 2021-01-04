@@ -111,7 +111,7 @@ class LatentTemplateCRFAR(nn.Module):
     # kv_enc.shape = [batch, embedding_size]
     kv_enc = kv_enc.sum(dim=1) / kv_mask_.sum(dim=1, keepdim=True)
     return kv_emb, kv_enc, kv_mask
-
+    
   def forward(self, keys, vals, 
     sentences, sent_lens, tau, x_lambd, return_grad=False, zcs=None):
     """Forward pass, first run the inference network, then run the decoder
@@ -466,12 +466,13 @@ class LatentTemplateCRFAR(nn.Module):
         continue
           
       fstate = {}
-      fstate["fixed"] = template[i] != -1
+      fstate["pholder"] = template[i] == "_"
+      fstate["fixed"] = template[i] not in [-1, "_"]
       fstate["state_vocab"] = template[i]
       fstate["exit"] = i == (len(template) - 1)
 
       fstate["prev_fstates"] = []
-      if not fstate["fixed"]:
+      if not (fstate["fixed"] or fstate["pholder"]):
         fstate["prev_fstates"].append(count)
       if count != 0:
         fstate["prev_fstates"].append(count-1)
@@ -523,6 +524,44 @@ class LatentTemplateCRFAR(nn.Module):
     out = self.z_crf.argmax(z_emission_scores, sent_lens).tolist()
     out_list = [out[i][:sent_lens[i].item()] for i in range(len(out))]
     return out_list
+
+  def posterior_marginals(self, keys, vals, sentences, sent_lens):
+    """Find the marginals for z given x and y
+    
+    Args:
+      keys: torch.tensor(torch.long), size=[batch, max_mem_len]
+      vals: torch.tensor(torch.long), size=[batch, max_mem_len]
+      sentences: torch.tensor(torch.long), size=[batch, sent_len]
+      sent_lens: torch.tensor(torch.long), size=[batch]
+
+    Returns:
+      argmax x for each sample
+    """
+    device = sentences.device
+    loss = 0.
+
+    ## sentence encoding 
+    sent_mask = sentences != self.pad_id
+    sentences_emb = self.embeddings(sentences)
+    # enc_outputs.shape = [batch, max_len, state_size]
+    enc_outputs, (enc_state_h, enc_state_c) =\
+      self.q_encoder(sentences_emb, sent_lens)
+    # NOTE: max_len != sentences.size(1), max_len = max(sent_lens)
+    max_len = enc_outputs.size(1)
+    sent_mask = sent_mask[:, : max_len]
+
+    # kv encoding 
+    kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
+
+    ## latent template
+    # emission score = log potential
+    # [batch, max_len, latent_vocab]
+    z_emission_scores = self.z_crf_proj(enc_outputs) 
+    if(self.z_overlap_logits):
+      z_emission_scores[:, :-1] += z_emission_scores[:, 1:].clone()
+      z_emission_scores[:, 1:] += z_emission_scores[:, :-1].clone()
+    
+    return self.z_crf.marginals(z_emission_scores, sent_lens)
   
   def infer2(self, keys, vals, templates):
     """Latent template inference step
@@ -579,7 +618,8 @@ class LatentTemplateCRFAR(nn.Module):
     decoded_score = []
     decoded_states = []
     decoded_copy = []
-    max_len = self.max_dec_len
+#     max_len = self.max_dec_len
+    max_len = 18
     window_size = 3
     
 
@@ -616,7 +656,7 @@ class LatentTemplateCRFAR(nn.Module):
       finished = False
         
       while not finished:
-#         if t>= max_len: break
+        if t>= max_len: break
         t += 1
         if len(endnodes) >= number_required: break
             
@@ -647,7 +687,8 @@ class LatentTemplateCRFAR(nn.Module):
           score_ys = []
         
           count = 0 
-            
+          
+#           print((fstate_idx, len(prev_nodes)))
           for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
             score_top, n_top = prev_nodes[elem]
             prev_fs.append(n_top["fstate_idx"])
@@ -672,9 +713,10 @@ class LatentTemplateCRFAR(nn.Module):
             prev_state = n_top["state_id"]
             prev_word = n_top["wordid"]
             
-            if prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
-              if fstates[fstate_idx]["fixed"] and fstates[fstate_idx]["state_vocab"] != prev_state:
-                continue
+#             if prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
+#               if fstates[fstate_idx]["fixed"] and fstates[fstate_idx]["state_vocab"] != prev_state:
+#                 continue
+            if not fstates[fstate_idx]["fixed"] and prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
               state_id = prev_state
               log_prob = state_logp[:,state_id:state_id+1]
               indexes = torch.tensor([[[state_id]]]).to(self.device)
@@ -713,7 +755,11 @@ class LatentTemplateCRFAR(nn.Module):
                 
               temp_wordlp = torch.log_softmax(x_logits, dim=-1)
               
-              log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
+              if fstates[fstate_idx]["exit"] and (fstates[fstate_idx]["fixed"] or fstates[fstate_idx]["pholder"]):
+                log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
+                indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
+              else:
+                log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
               
               temp_ww = []
               temp_pp = []  
@@ -728,7 +774,7 @@ class LatentTemplateCRFAR(nn.Module):
               ys = []
               ss = []
             
-              for new_k_w in range(beam_width):
+              for new_k_w in range(len(temp_ww)):
                 decoded_tw = temp_ww[new_k_w].view(-1)[0]
                 log_pw = temp_pp[new_k_w].item()
                 
@@ -758,7 +804,7 @@ class LatentTemplateCRFAR(nn.Module):
                 
             next_ys.append(next_y)
             score_ys.append(score_y)
-            
+        
           next_nodes = []
           for i in range(len(nextnodes)):
             score, nn_ = nextnodes[i]
@@ -809,10 +855,21 @@ class LatentTemplateCRFAR(nn.Module):
       decoded_states.append(utterances_s)
       decoded_score.append(scores_result)
     
-    pred_y = [el[0][1:-1] for el in decoded_batch]
-    pred_z = [el[0][1:-1] for el in decoded_states]
-    pred_score = [el[0] for el in decoded_score]
-        
+    pred_y = []
+    pred_z = []
+    pred_score = []
+    for batch_idx in range(len(decoded_batch)):
+        if decoded_batch[batch_idx] == []:
+            pred_y.append([])
+            pred_z.append([])
+            pred_score.append(-float("inf"))
+        else:
+            pred_y.append(decoded_batch[batch_idx][0][1:-1])
+            pred_z.append(decoded_states[batch_idx][0][1:-1])
+            pred_score.append(decoded_score[batch_idx][0])
+#     pred_y = [el[0][1:-1] for el in decoded_batch]
+#     pred_z = [el[0][1:-1] for el in decoded_states]
+#     pred_score = [el[0] for el in decoded_score]
     return pred_y, pred_z, pred_score
 
   def prepare_dec_io(self, 

@@ -408,6 +408,11 @@ class LinearChainCRF(nn.Module):
     H_total = p_T * (H_last - log_p_T)
     H_total = H_total.sum(dim = -1)
     return H_total
+  
+  def marginals(self, emission_scores, seq_lens):
+    all_scores = self.calculate_all_scores(emission_scores)
+    dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
+    return dist.marginals
 
   def argmax(self, emission_scores, seq_lens):
     all_scores = self.calculate_all_scores(emission_scores)
