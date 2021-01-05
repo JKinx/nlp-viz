@@ -42,6 +42,56 @@ class ControlledGen:
 
         return out_list
     
+    def get_yz_unfiltered(self, x_list, template_list=None):
+        batch_size = len(x_list)
+
+        if template_list is None:
+            template_list = [[-1] for _ in range(batch_size)]
+
+        kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
+        x_batch = self.dataset.batch_kv(kv_list)
+
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+
+        out_dict = self.model.model.infer2(keys, vals, template_list)
+
+        return out_dict
+    
+    def decode_out(self, pred_y, pred_z):
+        batch_size = len(pred_y)
+        pred_y, pred_z = dateSet_decode_out(self.dataset, pred_y, pred_z)
+        out_list = []
+        for i in range(batch_size):
+            out = {"y" : pred_y[i], 
+                   "z" : pred_z[i]}
+            out_list.append(out)
+        return out_list
+    
+    def decode_out_unfiltered(self, pred_y, pred_z):
+        batch_size = len(pred_y)
+        pred_y, pred_z = dateSet_decode_out_unfiltered(self.dataset, pred_y, pred_z)
+        out_list = []
+        for i in range(batch_size):
+            out = {"y" : pred_y[i], 
+                   "z" : pred_z[i]}
+            out_list.append(out)
+        return out_list
+    
+    def ibeam_init(self, x_list):
+        batch_size = len(x_list)
+
+        kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
+        x_batch = self.dataset.batch_kv(kv_list)
+
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+
+        return self.model.model.ibeam_init(keys, vals)
+    
+    def ibeam_act(self, ibeam_data, ibeam_key):
+        return self.model.model.ibeam_act(ibeam_data, ibeam_key)
+    
     def get_unfiltered_z_batched(self, x_list, y_list):
         batch_size = len(x_list)
 

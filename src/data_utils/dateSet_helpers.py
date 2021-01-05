@@ -27,6 +27,18 @@ def dateSet_filter_yz(y, z):
     z = list(map(lambda x : x[1], filtered))
     return y, z
 
+def dateSet_decode_out_unfiltered(dataset, ys, zs):
+    batch_size = len(ys)
+    sents = []
+    states = []
+
+    for idx in range(batch_size):
+        sent = [dataset.id2word[el] for el in ys[idx]]
+        sents.append(sent)
+        states.append(zs[idx])
+
+    return sents, states
+
 def dateSet_decode_out(dataset, ys, zs):
     batch_size = len(ys)
     sents = []

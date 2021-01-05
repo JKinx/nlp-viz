@@ -277,7 +277,6 @@ class LatentTemplateCRFAR(nn.Module):
       z_sample_ids, z_sample_emb, sentences, x_lambd)
     max_len = dec_inputs.size(1)
 
-    dec_cell = self.p_decoder
     if(self.use_src_info):
       state = self.init_state(mem_enc)
     else: 
@@ -293,10 +292,10 @@ class LatentTemplateCRFAR(nn.Module):
 
     for i in range(max_len): 
       if(self.use_src_info):
-        dec_out, state = dec_cell(
+        dec_out, state = self.p_decoder(
           dec_inputs[i], state, mem_emb, mem_mask)
       else: 
-        dec_out, state = dec_cell(
+        dec_out, state = self.p_decoder(
           dec_inputs[i], state)
       dec_out = dec_out[0]
 
@@ -310,7 +309,7 @@ class LatentTemplateCRFAR(nn.Module):
       # predict x based on z 
       dec_intermediate = self.p_z_intermediate(
         torch.cat([dec_out, z_sample_emb[i]], dim=1))
-      x_logits = dec_cell.output_proj(dec_intermediate)
+      x_logits = self.p_decoder.output_proj(dec_intermediate)
       lm_prob = F.softmax(x_logits, dim=-1)
 
       if(self.use_copy): 
@@ -396,8 +395,6 @@ class LatentTemplateCRFAR(nn.Module):
     batch_size = mem.size(0)
     device = mem.device
 
-    dec_cell = self.p_decoder
-
     predictions_x, predictions_z = [], []
     inp = self.embeddings(
       torch.zeros(batch_size).to(device).long() + self.start_id)
@@ -405,7 +402,7 @@ class LatentTemplateCRFAR(nn.Module):
     state = self.init_state(mem_enc)
     for i in range(self.max_dec_len): 
       # assume use_src_info=True
-      dec_out, state = dec_cell(inp, state, mem_emb, mem_mask)
+      dec_out, state = self.p_decoder(inp, state, mem_emb, mem_mask)
       dec_out = dec_out[0]
 
       # predict z 
@@ -421,7 +418,7 @@ class LatentTemplateCRFAR(nn.Module):
       z_emb = self.z_embeddings(z)
       dec_intermediate = self.p_z_intermediate(
         torch.cat([dec_out, z_emb], dim=1))
-      x_logits = dec_cell.output_proj(dec_intermediate)
+      x_logits = self.p_decoder.output_proj(dec_intermediate)
       lm_prob = F.softmax(x_logits, dim=-1)
 
       if(self.use_copy):
@@ -447,43 +444,6 @@ class LatentTemplateCRFAR(nn.Module):
     predictions_x = torch.stack(predictions_x).transpose(1, 0)
     predictions_z = torch.stack(predictions_z).transpose(1, 0)
     return predictions_x, predictions_z
-
-  def init_fstates(self, template):
-    fstates = []
-    plus_starts = []
-    
-    count = 0
-    for i in range(len(template)):
-      if template[i] == "(":
-        assert template[i+1] != ")"
-        plus_starts.append(len(fstates))
-        continue
-      
-      if template[i] == ")":
-        assert len(plus_starts) > 0
-        start_id = plus_starts.pop()
-        fstates[start_id]["prev_fstates"].append(len(fstates) - 1)
-        continue
-          
-      fstate = {}
-      fstate["pholder"] = template[i] == "_"
-      fstate["fixed"] = template[i] not in [-1, "_"]
-      fstate["state_vocab"] = template[i]
-      fstate["exit"] = i == (len(template) - 1)
-
-      fstate["prev_fstates"] = []
-      if not (fstate["fixed"] or fstate["pholder"]):
-        fstate["prev_fstates"].append(count)
-      if count != 0:
-        fstate["prev_fstates"].append(count-1)
-
-      fstate["nodes"] = []
-      fstates.append(fstate)
-      count += 1
-        
-    assert plus_starts == []
-    
-    return fstates
 
   def posterior_infer(self, keys, vals, sentences, sent_lens):
     """Find the argmax for z given x and y
@@ -607,229 +567,34 @@ class LatentTemplateCRFAR(nn.Module):
     """
     
     batch_size = mem.size(0)
-    device = mem.device
-    
-    # beam vars
-    beam_width = 2
-    beam_w_ = 2
-    topk = 5
     
     decoded_batch = []
     decoded_score = []
     decoded_states = []
     decoded_copy = []
-#     max_len = self.max_dec_len
-    max_len = 18
-    window_size = 3
-    
 
-    dec_cell = self.p_decoder
 
     predictions_x, predictions_z = [], []
     inp = self.embeddings(
-      torch.zeros(batch_size).to(device).long() + self.start_id)
+      torch.zeros(batch_size).to(self.device).long() + self.start_id)
     
     # assume use_src_info=True
     state = self.init_state(mem_enc)
     
-    
     beams_batch = []
     
     for idx in range(batch_size):
-      endnodes = []
-      number_required = min((topk + 1), topk - len(endnodes))
-        
-      fstates = self.init_fstates(templates[idx])
-      beams = []
-      for _ in range(len(fstates)):
-        beams.append({"prev_fs":[], "prev_ks":[], "next_zs":[],"next_ys":[], 
-                      "score_zs":[], "score_ys":[]})
-    
       inp_i = inp[idx:idx + 1]
       state_i = (state[0][:, idx:idx + 1, :].contiguous(), state[1][:, idx:idx + 1, :].contiguous())
       mem_emb_i = mem_emb[idx:idx+1]
       mem_mask_i = mem_mask[idx:idx+1]
       mem_i = mem[idx:idx+1]
     
-      t = 0
-      break_flag = False
-      finished = False
+      template = templates[idx]
+    
+      endnodes = self.beam_search(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template,
+                                 init_state_id = -1, init_wordid = self.start_id)
         
-      while not finished:
-        if t>= max_len: break
-        t += 1
-        if len(endnodes) >= number_required: break
-            
-        for fstate_idx in range(len(fstates)):
-          prev_nodes = []
-          prev_fstate_count = 0
-          
-          if t == 1 and fstate_idx == 0:
-            prev_fstate_count += 1
-            node = {'h': state_i, 'prevNode': None, 'wordid': self.start_id, 'logp': 0, 
-                    'leng': 1, 'state_id': -1, 'inp': inp_i, "fstate_idx" : fstate_idx, "idx" : -1}
-            prev_nodes.append((-node['logp'], node))
-            
-          nextnodes = []
-        
-          
-        
-          for prev_fstates in fstates[fstate_idx]["prev_fstates"]:
-            prev_fstate_count += 1
-            prev_nodes += fstates[prev_fstates]["nodes"]
-          prev_nodes = sorted(prev_nodes, key=lambda x: x[0])
-        
-          prev_fs = []
-          prev_ks = [] 
-          next_zs = []
-          next_ys = []
-          score_zs = []
-          score_ys = []
-        
-          count = 0 
-          
-#           print((fstate_idx, len(prev_nodes)))
-          for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
-            score_top, n_top = prev_nodes[elem]
-            prev_fs.append(n_top["fstate_idx"])
-            prev_ks.append(n_top["idx"])
-            
-            if n_top["wordid"] == self.end_id and n_top["prevNode"] != None:
-              endnodes.append((score, n_top))
-            
-              if len(endnodes) >= number_required:
-                break
-              else:
-                continue
-            
-            dec_out, decoder_hidden = dec_cell(n_top['inp'].contiguous(), n_top['h'], 
-                                         mem_emb_i, mem_mask_i)
-            dec_out = dec_out[0]
-            
-            z_logits = self.p_z_proj(dec_out)
-            
-            state_logp = torch.log_softmax(z_logits, dim=-1)
-            
-            prev_state = n_top["state_id"]
-            prev_word = n_top["wordid"]
-            
-#             if prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
-#               if fstates[fstate_idx]["fixed"] and fstates[fstate_idx]["state_vocab"] != prev_state:
-#                 continue
-            if not fstates[fstate_idx]["fixed"] and prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
-              state_id = prev_state
-              log_prob = state_logp[:,state_id:state_id+1]
-              indexes = torch.tensor([[[state_id]]]).to(self.device)
-            else: 
-              if fstates[fstate_idx]["fixed"]:
-                state_id = fstates[fstate_idx]["state_vocab"]
-                log_prob = state_logp[:,state_id:state_id+1]
-                indexes = torch.tensor([[[state_id]]]).to(self.device)
-              else:
-                log_prob, indexes = torch.topk(state_logp, beam_w_)
-            
-            next_zs.append(indexes.view(-1).tolist())
-            score_zs.append((n_top['logp'] + log_prob.view(-1)).tolist())
-            next_y = []
-            score_y = []
-            
-            for new_k in range(len(indexes.view(-1))):
-              decoded_ts = indexes.view(-1)[new_k]
-              log_ps = log_prob[0][new_k].item()
-                
-              z_emb = self.z_embeddings(torch.tensor([decoded_ts]).to(self.device))
-              dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
-              x_logits = dec_cell.output_proj(dec_intermediate)
-              lm_prob = F.softmax(x_logits, dim=-1)
-                
-              if(self.use_copy):
-                _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb_i, mem_mask_i)
-                copy_prob = tmu.batch_index_put(copy_dist, mem_i, self.vocab_size)
-                copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
-
-                out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
-                x_logits = (out_prob + 1e-10).log()
-                
-              if not fstates[fstate_idx]["exit"]:
-                x_logits[:,self.end_id] = float("-Inf")
-                
-              temp_wordlp = torch.log_softmax(x_logits, dim=-1)
-              
-              if fstates[fstate_idx]["exit"] and (fstates[fstate_idx]["fixed"] or fstates[fstate_idx]["pholder"]):
-                log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
-                indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
-              else:
-                log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
-              
-              temp_ww = []
-              temp_pp = []  
-                
-              for elem1, elem2 in zip(indexes_w.cpu().view(-1), log_prob_w.cpu().view(-1)):
-                temp_ww.append(elem1)
-                temp_pp.append(elem2)
-
-                if len(temp_ww) >= beam_width:
-                  break
-              
-              ys = []
-              ss = []
-            
-              for new_k_w in range(len(temp_ww)):
-                decoded_tw = temp_ww[new_k_w].view(-1)[0]
-                log_pw = temp_pp[new_k_w].item()
-                
-                inp_i = z_emb + self.embeddings(torch.tensor([decoded_tw]).to(self.device))
-                
-                node = {'h': decoder_hidden, 'prevNode': n_top, 'wordid': decoded_tw.item(),
-                        'logp': n_top['logp'] + log_ps + log_pw, 'leng': n_top['leng'] + 1,
-                        'state_id': decoded_ts.item(),  'inp': inp_i,
-                         "idx":count, "fstate_idx" : fstate_idx}
-                count += 1
-                
-                ys.append(decoded_tw.item())
-                ss.append(n_top['logp'] + log_ps + log_pw)
-                score = -node['logp']
-                
-                if node['wordid'] == self.end_id and node['prevNode'] != None:
-                  endnodes.append((score, node))
-                  continue
-                if node["leng"] >= max_len and fstate_idx == len(fstates)-1:
-                  endnodes.append((score, node))
-                  continue
-                else:
-                  nextnodes.append((score, node))
-                
-              next_y.append(ys)
-              score_y.append(ss)
-                
-            next_ys.append(next_y)
-            score_ys.append(score_y)
-        
-          next_nodes = []
-          for i in range(len(nextnodes)):
-            score, nn_ = nextnodes[i]
-            next_nodes.append((score, nn_))
-
-          next_nodes = sorted(next_nodes, key=lambda x: x[0])
-#                     print(fstate_idx, count,len(next_nodes))
-
-          if next_nodes != [] and fstate_idx == len(fstates) - 1 and next_nodes[0][1]["wordid"] == self.end_id:
-            finished = True
-            print("finished")
-
-          fstates[fstate_idx]["next_nodes"] = next_nodes
-
-          beams[fstate_idx]["prev_fs"].append(prev_fs)
-          beams[fstate_idx]["prev_ks"].append(prev_ks)
-          beams[fstate_idx]["next_zs"].append(next_zs)
-          beams[fstate_idx]["next_ys"].append(next_ys)
-          beams[fstate_idx]["score_zs"].append(score_zs)
-          beams[fstate_idx]["score_ys"].append(score_ys)
-            
-        for fstate_idx in range(len(fstates)):
-          fstates[fstate_idx]["nodes"] = fstates[fstate_idx]["next_nodes"]
-        
-      beams_batch.append(beams)
       utterances_w = []
       utterances_s = []
       scores_result = []
@@ -867,10 +632,329 @@ class LatentTemplateCRFAR(nn.Module):
             pred_y.append(decoded_batch[batch_idx][0][1:-1])
             pred_z.append(decoded_states[batch_idx][0][1:-1])
             pred_score.append(decoded_score[batch_idx][0])
-#     pred_y = [el[0][1:-1] for el in decoded_batch]
-#     pred_z = [el[0][1:-1] for el in decoded_states]
-#     pred_score = [el[0] for el in decoded_score]
+            
     return pred_y, pred_z, pred_score
+
+
+  def ibeam_init(self, keys, vals):
+    """ Interactive beam search initialization
+    """
+    assert keys.size(0) == 1
+
+    mem_i = vals
+    mem_emb_i, kv_enc, mem_mask_i = self.encode_kv(keys, vals)
+    state_i = self.init_state(kv_enc)
+    inp_i = self.embeddings(
+      torch.zeros(1).to(self.device).long() + self.start_id)
+
+    sequences = self.beam_extend(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, 
+                                 init_state_id = -1, init_wordid = self.start_id)
+
+    ibeam_data = {"key" : keys, "val" : vals, "mem_emb_i" : mem_emb_i,
+                  "mem_mask_i" : mem_mask_i, "mem_i" : mem_i}
+
+    z_list, y_list, score_list, cache, yz = self.extract_data([], [], sequences)
+
+    ibeam_data["cache"] = cache
+    ibeam_data["yz"] = yz
+    
+    out_dict = {"z_list" : z_list,
+                "y_list" : y_list,
+                "score_list" : score_list
+               }
+      
+    return out_dict, ibeam_data
+
+
+  def ibeam_act(self, ibeam_data, ibeam_key):
+    mem_i = ibeam_data["mem_i"]
+    mem_emb_i = ibeam_data["mem_emb_i"]
+    mem_mask_i = ibeam_data["mem_i"]
+    inp_i = ibeam_data["cache"][ibeam_key]["inp"]
+    state_i = ibeam_data["cache"][ibeam_key]["h"]
+    
+    prefix_z = ibeam_data["cache"][ibeam_key]["z"]
+    prefix_y = ibeam_data["cache"][ibeam_key]["y"]
+    prefix_score = ibeam_data["cache"][ibeam_key]["score"]
+    
+    sequences = self.beam_extend(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, 
+                                 init_state_id = prefix_z[-1], init_wordid = prefix_y[-1], 
+                                 init_score = prefix_score)
+
+    
+    z_list, y_list, score_list, cache, yz = self.extract_data(prefix_z, prefix_y, sequences)
+
+    ibeam_data["cache"].update(cache)
+    ibeam_data["yz"].update(yz)
+
+    out_dict = {"z_list" : z_list,
+                "y_list" : y_list,
+                "score_list" : score_list
+               }
+      
+    return out_dict, ibeam_data
+
+
+  def beam_extend(self, inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, init_state_id, init_wordid, init_score = 0):
+    sequences = []
+
+    for state_id in range(self.latent_vocab_size):
+      template = [state_id, -1]
+      endnodes = self.beam_search(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template, 
+                                  init_state_id, init_wordid, init_score)
+
+      score, n = sorted(endnodes, key=operator.itemgetter(0))[0]
+
+      sequence = {"score" : score}
+
+      z = [n["state_id"]]
+      y = [n["wordid"]]
+      inp = [n["inp"]]
+      state = [n["h"]]
+      scores = [-n["logp"]]
+
+      while n["prevNode"]["prevNode"] != None:
+        n = n["prevNode"]
+        z += [n["state_id"]]
+        y += [n["wordid"]]
+        inp += [n["inp"]]
+        state += [n["h"]]
+        scores += [-n["logp"]]
+
+      sequence["z"] = z[::-1]
+      sequence["y"] = y[::-1]
+      sequence["inp"] = inp[::-1]
+      sequence["h"] = state[::-1]
+      sequence["scores"] = scores[::-1]
+
+      sequences.append(sequence)
+
+    return sequences   
+
+
+  def extract_data(self, prefix_z, prefix_y, sequences):
+    y_list = []
+    z_list = []
+    score_list = []
+    yz = set()
+    cache = {}
+
+    for seq in sequences:
+      score = seq["score"]
+      score_list.append(score)
+        
+      z = prefix_z + seq["z"]
+      z_list.append(z)
+
+      y = prefix_y + seq["y"]
+      y_list.append(y)
+
+      yz.add((tuple(y), tuple(z), score))
+      
+      for i in range(len(seq["z"])):
+        cache_key = tuple(prefix_z + seq["z"][0:i+1])
+        cache[cache_key] = {"inp" : seq["inp"][i], 
+                            "h" : seq["h"][i],
+                            "z" : prefix_z + seq["z"][0:i+1],
+                            "y" : prefix_y + seq["y"][0:i+1],
+                            "score" : seq["scores"][i]
+                            }
+
+    return z_list, y_list, score_list, cache, yz   
+
+
+  def beam_search(self, inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template, init_state_id, init_wordid, init_score = 0):
+    # beam vars
+    beam_width = 2 # for y
+    beam_w_ = 2 # for z
+    topk = 5
+    #     max_len = self.max_dec_len
+    max_len = 18
+    window_size = 3
+    
+    endnodes = []
+    number_required = min((topk + 1), topk - len(endnodes))
+      
+    fstates = self.init_fstates(template)
+  
+    t = 0
+    break_flag = False
+    finished = False
+      
+    while not finished:
+      if t>= max_len: break
+      t += 1
+      if len(endnodes) >= number_required: break
+          
+      for fstate_idx in range(len(fstates)):
+        prev_nodes = []
+        prev_fstate_count = 0
+        
+        if t == 1 and fstate_idx == 0:
+          prev_fstate_count += 1
+          node = {'h': state_i, 'prevNode': None, 'wordid': init_wordid, 'logp': -init_score, 
+                  'leng': 1, 'state_id': init_state_id, 'inp': inp_i, "fstate_idx" : fstate_idx}
+          prev_nodes.append((-node['logp'], node))
+          
+        nextnodes = []
+      
+        for prev_fstates in fstates[fstate_idx]["prev_fstates"]:
+          prev_fstate_count += 1
+          prev_nodes += fstates[prev_fstates]["nodes"]
+        prev_nodes = sorted(prev_nodes, key=lambda x: x[0])
+        
+        for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
+          score_top, n_top = prev_nodes[elem]
+          
+          if n_top["wordid"] == self.end_id and n_top["prevNode"] != None:
+            endnodes.append((score, n_top))
+          
+            if len(endnodes) >= number_required:
+              break
+            else:
+              continue
+          
+          dec_out, decoder_hidden = self.p_decoder(n_top['inp'].contiguous(), n_top['h'], 
+                                       mem_emb_i, mem_mask_i)
+          dec_out = dec_out[0]
+          
+          z_logits = self.p_z_proj(dec_out)
+          
+          state_logp = torch.log_softmax(z_logits, dim=-1)
+          
+          prev_state = n_top["state_id"]
+          prev_word = n_top["wordid"]
+          
+          if prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
+            if fstates[fstate_idx]["fixed"] and fstates[fstate_idx]["state_vocab"] != prev_state:
+              continue
+#             if not fstates[fstate_idx]["fixed"] and prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
+            state_id = prev_state
+            log_prob = state_logp[:,state_id:state_id+1]
+            indexes = torch.tensor([[[state_id]]]).to(self.device)
+          else: 
+            if fstates[fstate_idx]["fixed"]:
+              state_id = fstates[fstate_idx]["state_vocab"]
+              log_prob = state_logp[:,state_id:state_id+1]
+              indexes = torch.tensor([[[state_id]]]).to(self.device)
+            else:
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+
+          for new_k in range(len(indexes.view(-1))):
+            decoded_ts = indexes.view(-1)[new_k]
+            log_ps = log_prob[0][new_k].item()
+              
+            z_emb = self.z_embeddings(torch.tensor([decoded_ts]).to(self.device))
+            dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
+            x_logits = self.p_decoder.output_proj(dec_intermediate)
+            lm_prob = F.softmax(x_logits, dim=-1)
+              
+            if(self.use_copy):
+              _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb_i, mem_mask_i)
+              copy_prob = tmu.batch_index_put(copy_dist, mem_i, self.vocab_size)
+              copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
+
+              out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
+              x_logits = (out_prob + 1e-10).log()
+              
+            if not fstates[fstate_idx]["exit"]:
+              x_logits[:,self.end_id] = float("-Inf")
+              
+            temp_wordlp = torch.log_softmax(x_logits, dim=-1)
+            
+            if fstates[fstate_idx]["exit"] and (fstates[fstate_idx]["fixed"] or fstates[fstate_idx]["pholder"]):
+              log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
+              indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
+            else:
+              log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
+            
+            temp_ww = []
+            temp_pp = []  
+              
+            for elem1, elem2 in zip(indexes_w.cpu().view(-1), log_prob_w.cpu().view(-1)):
+              temp_ww.append(elem1)
+              temp_pp.append(elem2)
+
+              if len(temp_ww) >= beam_width:
+                break
+          
+            for new_k_w in range(len(temp_ww)):
+              decoded_tw = temp_ww[new_k_w].view(-1)[0]
+              log_pw = temp_pp[new_k_w].item()
+              
+              inp_i = z_emb + self.embeddings(torch.tensor([decoded_tw]).to(self.device))
+              
+              node = {'h': decoder_hidden, 'prevNode': n_top, 'wordid': decoded_tw.item(),
+                      'logp': n_top['logp'] + log_ps + log_pw, 'leng': n_top['leng'] + 1,
+                      'state_id': decoded_ts.item(),  'inp': inp_i,
+                       "fstate_idx" : fstate_idx}
+            
+              score = -node['logp']
+              
+              if node['wordid'] == self.end_id and node['prevNode'] != None:
+                endnodes.append((score, node))
+                continue
+              if node["leng"] >= max_len and fstate_idx == len(fstates)-1:
+                endnodes.append((score, node))
+                continue
+              else:
+                nextnodes.append((score, node))
+      
+        next_nodes = []
+        for i in range(len(nextnodes)):
+          score, nn_ = nextnodes[i]
+          next_nodes.append((score, nn_))
+
+        next_nodes = sorted(next_nodes, key=lambda x: x[0])
+
+        if next_nodes != [] and fstate_idx == len(fstates) - 1 and next_nodes[0][1]["wordid"] == self.end_id:
+          finished = True
+
+        fstates[fstate_idx]["next_nodes"] = next_nodes
+          
+      for fstate_idx in range(len(fstates)):
+        fstates[fstate_idx]["nodes"] = fstates[fstate_idx]["next_nodes"]
+        
+    return endnodes
+
+
+  def init_fstates(self, template):
+    fstates = []
+    plus_starts = []
+    
+    count = 0
+    for i in range(len(template)):
+      if template[i] == "(":
+        assert template[i+1] != ")"
+        plus_starts.append(len(fstates))
+        continue
+      
+      if template[i] == ")":
+        assert len(plus_starts) > 0
+        start_id = plus_starts.pop()
+        fstates[start_id]["prev_fstates"].append(len(fstates) - 1)
+        continue
+          
+      fstate = {}
+      fstate["pholder"] = template[i] == "_"
+      fstate["fixed"] = template[i] not in [-1, "_"]
+      fstate["state_vocab"] = template[i]
+      fstate["exit"] = i == (len(template) - 1)
+
+      fstate["prev_fstates"] = []
+      if not (fstate["fixed"] or fstate["pholder"]):
+        fstate["prev_fstates"].append(count)
+      if count != 0:
+        fstate["prev_fstates"].append(count-1)
+
+      fstate["nodes"] = []
+      fstates.append(fstate)
+      count += 1
+        
+    assert plus_starts == []
+    
+    return fstates
+
 
   def prepare_dec_io(self, 
     z_sample_ids, z_sample_emb, sentences, x_lambd):
