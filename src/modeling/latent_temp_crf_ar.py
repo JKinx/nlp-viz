@@ -81,10 +81,13 @@ class LatentTemplateCRFAR(nn.Module):
     self.num_pr_constraints = config.num_pr_constraints
     
     # constraints for beam search
-    self.locked_zs = [0,1,2]
-    self.key_ys = {0 : config.word2id["_ndend_"],
-                    1 : config.word2id["_odend_"],
-                    2 : config.word2id["_mend_"]}
+    if "_ndend_" in config.word2id:
+        self.locked_zs = [0,1,2]
+        self.key_ys = {0 : config.word2id["_ndend_"],
+                        1 : config.word2id["_odend_"],
+                        2 : config.word2id["_mend_"]}
+    else:
+        self.locked_zs = []
     return 
 
   def init_state(self, s):
