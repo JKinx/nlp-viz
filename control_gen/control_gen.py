@@ -1,9 +1,10 @@
-from modeling.latent_temp_crf_ar_model import LatentTemplateCRFARModel
-from data_utils.dateSet_helpers import *
+# from modeling.latent_temp_crf_ar_model import LatentTemplateCRFARModel
+from .modeling import LatentTemplateCRFARModel
+from .data_utils.dateSet_helpers import *
 import torch
 import pickle
 
-class ControlledGen:
+class ControlGen:
     def __init__(self, model_name="dateSet", device="cpu"):
         loaded = torch.load("../dateSet/models/" + model_name)
         self.config = loaded["config"]

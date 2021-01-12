@@ -8,14 +8,15 @@ import torch
 
 from datetime import datetime
 
-from modeling import torch_model_utils as tmu
+from .modeling import torch_model_utils as tmu
 
-from controller import Controller
-from config import Config
+from .controller import Controller
+from .config import Config
 
-from modeling.latent_temp_crf_ar_model import LatentTemplateCRFARModel
+# from modeling.latent_temp_crf_ar_model import LatentTemplateCRFARModel
+from .modeling import LatentTemplateCRFARModel
 
-from data_utils.dataset import Dataset
+from .data_utils import Dataset
 
 import pickle
 
