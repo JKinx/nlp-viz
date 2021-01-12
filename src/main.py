@@ -176,7 +176,9 @@ def define_argument(config):
     "--pr", type=str2bool, 
     nargs='?', const=True)
   parser.add_argument(
-    "--pr_lambd", default=config.pr_lambd, type=float)
+    "--pr_inc_lambd", default=config.pr_lambd, type=float)
+  parser.add_argument(
+    "--pr_exc_lambd", default=config.pr_lambd, type=float)
   
 
   args = parser.parse_args()

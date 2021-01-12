@@ -77,7 +77,8 @@ class LatentTemplateCRFAR(nn.Module):
     
     # posterior regularization
     self.pr = config.pr
-    self.pr_lambd = config.pr_lambd
+    self.pr_inc_lambd = config.pr_inc_lambd
+    self.pr_exc_lambd = config.pr_exc_lambd
     self.num_pr_constraints = config.num_pr_constraints
     
     # constraints for beam search
@@ -166,11 +167,13 @@ class LatentTemplateCRFAR(nn.Module):
       out_dict["z_scores"] = z_emission_scores
         
       # get pr loss
-      pr_loss = self.compute_pr(z_emission_scores, zcs[:, :max_len], 
+      pr_inc_loss, pr_exc_loss = self.compute_pr(z_emission_scores, zcs[:, :max_len], 
                                 sent_mask, sent_lens)
-      out_dict["pr_val"] = tmu.to_np(pr_loss)
-      out_dict["pr_loss"] = self.pr_lambd * tmu.to_np(pr_loss)
-      loss -= self.pr_lambd * pr_loss
+      out_dict["pr_inc_val"] = tmu.to_np(pr_inc_loss)
+      out_dict["pr_exc_val"] = tmu.to_np(pr_exc_loss)
+      out_dict["pr_inc_loss"] = self.pr_inc_lambd * tmu.to_np(pr_inc_loss)
+      out_dict["pr_exc_loss"] = self.pr_exc_lambd * tmu.to_np(pr_exc_loss)
+      loss -= self.pr_inc_lambd * pr_inc_loss + self.pr_exc_lambd * pr_exc_loss
         
     
     # entropy regularization
@@ -254,11 +257,15 @@ class LatentTemplateCRFAR(nn.Module):
     # computer loss
     # {1 - q(z = sigma(f) | x, y)} if f is used else {q(z = sigma(f) | x, y)}
     loss = (check.float() - rel_marginals).abs() * sent_mask.unsqueeze(-1).float()
+    inc_loss = (1 - rel_marginals).abs() * check.float() * sent_mask.unsqueeze(-1).float()
+    exc_loss = rel_marginals * (1 - check.float()) * sent_mask.unsqueeze(-1).float()
     
     # take average
-    final_loss = loss.sum() / sent_lens.sum()
+    final_inc_loss = inc_loss.sum() / check.float().sum()
+    final_exc_loss = exc_loss.sum() / (sent_lens.sum() - check.float().sum())
+#     final_loss = loss.sum() / sent_lens.sum()
     
-    return final_loss
+    return final_inc_loss, final_exc_loss
 
   def decode_train(self, 
     z_sample_ids, z_sample_emb, sent_lens,
@@ -770,6 +777,8 @@ class LatentTemplateCRFAR(nn.Module):
     # beam vars
     beam_width = 2 # for y
     beam_w_ = 2 # for z
+#     beam_width = 5 # for y
+#     beam_w_ = 5 # for z
     topk = 5
     #     max_len = self.max_dec_len
     max_len = 18

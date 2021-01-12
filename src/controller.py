@@ -122,10 +122,13 @@ class Controller(object):
 
     return 
 
-  def save(self, model, ei):
+  def save(self, model, ei, end=False):
     """Save the model after epoch"""
 #     save_path = self.model_path + 'ckpt_e%d' % ei
-    save_path = self.model_path + 'best'
+    if not end:
+        save_path = self.model_path + 'best'
+    else:
+        save_path = self.model_path + 'last'
     print('Saving the model at: %s' % save_path)
     torch.save(
       {'model_state_dict': model.state_dict(), 
@@ -272,6 +275,7 @@ class Controller(object):
         print('validate_start_epoch = %d, current %d, do not validate' % 
           (self.validate_start_epoch, ei))
     
+    self.save(model, -1, end=True)
     self.validate(model, dataset, -1, -1, 'test')
     return
 
