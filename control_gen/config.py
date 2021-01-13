@@ -6,11 +6,12 @@ class Config:
     self.dataset = 'test_dataset'
 
     self.output_path = '../outputs/'
-    self.tensorboard_path = '../tensorboard/'
+    self.tensorboard_path = 'tensorboard/'
     self.model_path = '../models/'
 
     ## Dataset 
     self.data_root = '../data/'
+    self.data_path = ""
 
     self.max_sent_len = 37 
     self.max_dec_len = 38
@@ -105,8 +106,9 @@ class Config:
     
     # pr 
     self.pr = False
-    self.pr_lambd = None
-    self.num_pr_constraints = 7
+    self.pr_inc_lambd = None
+    self.pr_exc_lambd = None
+    self.num_pr_constraints = 5
 
     # decoding 
     self.z_pred_strategy = 'greedy'

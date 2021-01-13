@@ -5,8 +5,8 @@ import torch
 import pickle
 
 class ControlGen:
-    def __init__(self, model_name="dateSet", device="cpu"):
-        loaded = torch.load("../dateSet/models/" + model_name)
+    def __init__(self, model_path="", device="cpu"):
+        loaded = torch.load(model_path)
         self.config = loaded["config"]
         self.config.device = device
 
@@ -14,16 +14,6 @@ class ControlGen:
 
         self.model = LatentTemplateCRFARModel(self.config)
         self.model.load_state_dict(loaded["model_state_dict"])
-        
-        
-#         loaded = pickle.load(open("../dateSet/best", "rb"))
-#         self.config = loaded["config"]
-#         self.config.device = device
-
-#         self.dataset = loaded["dataset"]
-
-#         self.model = LatentTemplateCRFARModel(self.config)
-#         self.model.load_state_dict(loaded["model"])
         self.model.to(self.config.device)
         self.model.eval()
         del loaded

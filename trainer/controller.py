@@ -4,7 +4,7 @@ import copy
 
 import numpy as np 
 
-from .modeling import torch_model_utils as tmu
+from control_gen.modeling import torch_model_utils as tmu
 
 from torch import nn 
 from torch.optim import Adam, SGD, RMSprop
@@ -17,7 +17,8 @@ from pprint import pprint
 import rouge
 from nltk.translate.bleu_score import corpus_bleu
 
-from .logger import TrainingLog 
+from logger import TrainingLog 
+from template_manager import TemplateManager
 from tensorboardX import SummaryWriter
 
 import pickle
@@ -92,6 +93,11 @@ class Controller(object):
     self.save_ckpt = True
 
     self.schedule_params = dict()
+
+    # template manager
+    if(self.model_name.startswith('latent_temp') and config.save_temp):
+      self.template_manager = TemplateManager(config, dataset.id2word)
+    else: self.template_manager = None
 
     # logging 
     self.logger = TrainingLog(config) 

@@ -8,15 +8,14 @@ import torch
 
 from datetime import datetime
 
-from .modeling import torch_model_utils as tmu
+from control_gen.modeling import torch_model_utils as tmu
 
-from .controller import Controller
-from .config import Config
+from controller import Controller
+from control_gen.config import Config
 
-# from modeling.latent_temp_crf_ar_model import LatentTemplateCRFARModel
-from .modeling import LatentTemplateCRFARModel
+from control_gen.modeling import LatentTemplateCRFARModel
 
-from .data_utils import Dataset
+from control_gen.data_utils import Dataset
 
 import pickle
 
@@ -177,9 +176,9 @@ def define_argument(config):
     "--pr", type=str2bool, 
     nargs='?', const=True)
   parser.add_argument(
-    "--pr_inc_lambd", default=config.pr_lambd, type=float)
+    "--pr_inc_lambd", default=config.pr_inc_lambd, type=float)
   parser.add_argument(
-    "--pr_exc_lambd", default=config.pr_lambd, type=float)
+    "--pr_exc_lambd", default=config.pr_inc_lambd, type=float)
   
 
   args = parser.parse_args()
