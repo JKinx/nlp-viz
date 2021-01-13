@@ -2,5 +2,5 @@ py-rouge
 tensorboardX
 tqdm
 nltk
-num2word
+num2words
 torch
