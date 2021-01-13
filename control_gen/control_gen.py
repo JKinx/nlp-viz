@@ -16,6 +16,7 @@ class ControlGen:
         self.model.load_state_dict(loaded["model_state_dict"])
         self.model.to(self.config.device)
         self.model.eval()
+        
         del loaded
         
     def get_unfiltered_yz_batched(self, x_list, template_list=None):
