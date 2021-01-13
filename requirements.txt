@@ -3,4 +3,4 @@ tensorboardX
 tqdm
 nltk
 num2words
-torch
+torch==1.7.0

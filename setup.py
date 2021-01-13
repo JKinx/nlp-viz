@@ -8,7 +8,7 @@ setup(
    packages=['control_gen'],
    url='https://github.com/JKinx/nlp-viz',
    install_requires=[
-       "torch",
+       "torch==1.7.0",
        "nltk",
        "py-rouge",
        "tensorboardX",
