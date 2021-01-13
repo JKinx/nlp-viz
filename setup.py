@@ -12,6 +12,7 @@ setup(
        "nltk",
        "py-rouge",
        "tensorboardX",
-       "num2word"
+       "num2word",
+       "tqdm"
    ],
 )
