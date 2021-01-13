@@ -60,9 +60,9 @@ Dictionary object consisting of:
 
 To test the apis:
 
-```python test_api.py --model model_name --device device --api api_name --template_id template_id```
+```python test_api.py --model model_path --device device --api api_name --template_id template_id```
 
-**model_name:** dateSet
+**model_path:** path of the model
 
 **device:** `cuda`, `gpu`, `cuda:0`, etc.
 
