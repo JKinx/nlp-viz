@@ -1,6 +1,18 @@
+## Install Model
+
+Install the `control-gen` package by running the following in your terminal
+
+```bash
+pip install -e git+https://github.com/JKinx/nlp-viz.git#egg=control-gen
+```
+
 ## Instantiate Model
 
-```ControlGen(model_path, device)```
+```python
+from control_gen import ControlGen
+
+ControlGen(model_path, device)
+```
 
 **model_path**
 
@@ -60,7 +72,9 @@ Dictionary object consisting of:
 
 To test the apis:
 
-```python test_api.py --model model_path --device device --api api_name --template_id template_id```
+```bash
+python test_api.py --model model_path --device device --api api_name --template_id template_id
+```
 
 **model_path:** path of the model
 
