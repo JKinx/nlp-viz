@@ -1,50 +1,82 @@
-![title](img/model_github.png)
+## Instantiate Model
 
-Yao Fu, Chuanqi Tan, Bin Bi, Mosha Chen, Yansong Feng, Alexander Rush. Latent Template Induction with Gumbel-CRFs. NeurIPS 2020. ([pdf](https://github.com/FranxYao/Gumbel-CRF/blob/main/doc/gumbel_crf_camera_ready.pdf))
+```ControlGen(model_path, device)```
 
-## Implementation 
-* Gumbel-FFBS: `src/modeling/structure/linear_crf.py` line 195
-* Core model: `src/modeling/latent_temp_crf_ar.py`
-* Training, validation, evaluation: `src/controller.py`
-* Configuration: `src/config.py`
+**model_path**
 
-## Experiments
+Path of the model to use.
 
-#### Text Modeling, Gumbel-CRF
+**device**
 
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --dataset=e2e --task=density --model_version=1.0.3.1 --gpu_id=6 --latent_vocab_size=20 --z_beta=1e-3 --z_overlap_logits=False --use_copy=False --use_src_info=False --num_epoch=60 --validate_start_epoch=0 --num_sample_nll=100 --x_lambd_start_epoch=10 --x_lambd_anneal_epoch=2 --batch_size_train=100 --inspect_grad=False --inspect_model=True  > ../log/latent_temp_crf_ar.1.0.3.1  2>&1 & tail -f ../log/latent_temp_crf_ar.1.0.3.1
-```
+Device to run the model on. It can be `gpu`, `cuda` or a specific cuda device such as `cuda:0`
 
-#### Text Modeling, REINFORCE
+## Get y, z from x  and z template (optional) `get_yz`
 
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --grad_estimator=score_func --dataset=e2e --task=density --model_version=2.0.0.1 --gpu_id=2 --latent_vocab_size=20 --z_beta=1.05 --z_gamma=0 --z_b0=0.1 --z_overlap_logits=False --use_copy=False --use_src_info=False --num_epoch=60 --validate_start_epoch=0 --batch_size_train=100 --num_sample_nll=100 --x_lambd_start_epoch=10 --x_lambd_anneal_epoch=2 > ../log/latent_temp_crf_ar.2.0.0.1  2>&1 & tail -f ../log/latent_temp_crf_ar.2.0.0.1
-```
+### Input
 
-#### Text Modeling, PM-MRF
+`x` : A tuple `(day, month, year)`
 
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --dataset=e2e --task=density --model_version=1.5.0.0 --gpu_id=5 --latent_vocab_size=20 --z_beta=1e-3 --z_sample_method=pm --z_overlap_logits=False --use_copy=False --use_src_info=False --num_epoch=60 --validate_start_epoch=0 --num_sample_nll=100 --tau_anneal_epoch=60 --x_lambd_start_epoch=10 --x_lambd_anneal_epoch=2 --batch_size_train=100 --inspect_grad=False --inspect_model=True  > ../log/latent_temp_crf_ar.1.5.0.0  2>&1 & tail -f ../log/latent_temp_crf_ar.1.5.0.0
-```
-
-#### Paraphrase Generation, Gumbel-CRF
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --dataset=mscoco --task=generation --model_version=1.3.1.0 --gpu_id=0 --latent_vocab_size=50 --z_beta=1e-3 --z_overlap_logits=False --use_copy=True --use_src_info=True --num_epoch=40 --validate_start_epoch=0 --validation_criteria=b2 --num_sample_nll=100 --x_lambd_start_epoch=0 --x_lambd_anneal_epoch=10 --batch_size_train=100 --batch_size_eval=100 --inspect_grad=False --inspect_model=True --write_full_predictions=True > ../log/latent_temp_crf_ar.1.3.1.0  2>&1 & tail -f ../log/latent_temp_crf_ar.1.3.1.0
-```
-
-#### Paraphrase Generation, REINFORCE
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --grad_estimator=score_func --dataset=mscoco --task=generation --model_version=2.5.0.0 --gpu_id=4 --latent_vocab_size=50 --z_beta=1.05 --z_gamma=0 --z_b0=0.1 --use_copy=True --use_src_info=True --num_epoch=40 --validate_start_epoch=0 --batch_size_train=100 --num_sample_nll=100 --x_lambd_start_epoch=10 --x_lambd_anneal_epoch=2 --validation_criteria=b4 --test_validate=true > ../log/latent_temp_crf_ar.2.5.0.0  2>&1 & tail -f ../log/latent_temp_crf_ar.2.5.0.0
-```
+**Note:** Currently, the year is limted to the range 2000-2020
 
 
-#### Data-to-text, Gumbel-CRF
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --dataset=e2e --task=generation --model_version=1.2.0.1 --gpu_id=4 --latent_vocab_size=20 --z_beta=1e-3 --z_overlap_logits=False --use_copy=True --use_src_info=True --num_epoch=80 --validate_start_epoch=0 --validation_criteria=b2 --num_sample_nll=100 --x_lambd_start_epoch=0 --x_lambd_anneal_epoch=10 --batch_size_train=100 --inspect_grad=False --inspect_model=True --write_full_predictions=True --test_validate > ../log/latent_temp_crf_ar.1.2.0.1  2>&1 & tail -f ../log/latent_temp_crf_ar.1.2.0.1
-```
+`template` (optional) : Template for `z` `[state_id/-1, (, ..., ),...,-1]`
 
-#### Data-to-text, REINFORCE
-```bash
-nohup python main.py --model_name=latent_temp_crf_ar --grad_estimator=score_func --dataset=e2e --task=generation --model_version=2.2.0.1 --gpu_id=6 --latent_vocab_size=20 --z_beta=1.05 --z_gamma=0 --z_b0=0.1 --z_overlap_logits=False --use_copy=True --use_src_info=True --num_epoch=80 --validate_start_epoch=0 --validation_criteria=b4 --batch_size_train=100 --num_sample_nll=100 --x_lambd_start_epoch=0 --x_lambd_anneal_epoch=10 > ../log/latent_temp_crf_ar.2.2.0.1  2>&1 & tail -f ../log/latent_temp_crf_ar.2.2.0.1
-```
+The template is a list of state_ids (to force parts of `z`) and `-1` which stands for one or more of any state_id.
+
+Parts of the template can be enclosed in parentheses `(...)` to allow for repetition of the part (one or more times).
+
+**Note:** The template always needs to end with `-1`. No template is equivalent to the template `[-1]`
+
+
+### Output
+
+Dictionary object consisting of:
+
+- `y` : Output sentence `[word0, word1, ...]`
+
+- `score`: Score for sentence during beam search
+
+- `z`: State for each word in y `[state0, state1, ...]`
+
+
+## Get z from x and y `get_z`
+
+### Input
+
+`x` : A tuple `(day, month, year)`
+
+**Note:** Currently, the year is limted to the range 2000-2020
+
+`y`: Output sentence `[word0, word1, ...]`
+
+### Output
+
+Dictionary object consisting of:
+
+- `z`: State for each word in y `[state0, state1, ...]`
+
+
+## Testing the apis
+
+To test the apis:
+
+```python test_api.py --model model_name --device device --api api_name --template_id template_id```
+
+**model_name:** dateSet
+
+**device:** `cuda`, `gpu`, `cuda:0`, etc.
+
+**api_name:** `get_yz`, `get_yz_templated`, `get_z`
+
+**template_id:** only required if api is `get_yz_templated`. Integer between `0` and `7` for each format.
+
+Example: For `x = (25,5,2003)`, the corresponding output formats are 
+
+- `0` : `today is twenty five may 2003 .`
+- `1` : `it is twenty five may of the year 2003 .` 
+- `2` : `today is may twenty five , 2003 .`
+- `3` : `it is may twenty five in the year 2003 .`
+- `4` : `today is the twenty fifth of may , 2003 .`
+- `5` : `it is the twenty fifth of may in the year 2003 .`
+- `6` : `today is may the twenty fifth , 2003 .`
+- `7` : `it is may the twenty fifth of the year 2003`
