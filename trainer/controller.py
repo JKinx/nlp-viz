@@ -4,7 +4,7 @@ import copy
 
 import numpy as np 
 
-from modeling import torch_model_utils as tmu
+from control_gen.modeling import torch_model_utils as tmu
 
 from torch import nn 
 from torch.optim import Adam, SGD, RMSprop

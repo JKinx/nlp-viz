@@ -6,3 +6,5 @@ src/.mypy_cache
 src/.vscode
 *__pycache__/
 *nohup.out
+control_gen.egg-info
+dateSet

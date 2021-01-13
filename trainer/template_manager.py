@@ -4,7 +4,7 @@ import editdistance
 
 from tqdm import tqdm 
 from collections import defaultdict, Counter
-from modeling import torch_model_utils as tmu
+from control_gen.modeling import torch_model_utils as tmu
 
 def _next_ngram(temp, sent, idx, n, slen):
   """Get the next ngram from a template-sentence pair"""

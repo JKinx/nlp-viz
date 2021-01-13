@@ -10,7 +10,8 @@ from torch.distributions import Uniform
 
 from .lstm_seq2seq.encoder import LSTMEncoder
 from .lstm_seq2seq.decoder import LSTMDecoder, Attention
-from .structure.linear_crf import LinearChainCRF
+# from .structure.linear_crf import LinearChainCRF
+from .structure import LinearChainCRF
 from . import torch_model_utils as tmu
 import operator
 
