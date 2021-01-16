@@ -266,7 +266,7 @@ def batch_index_put(A, ind, N):
   device = A.device
   A_put = torch.zeros([batch_size * N] + As).to(device)
   ind_ = torch.arange(batch_size).view(batch_size, 1) * N
-  ind_ = ind_.expand(batch_size, M).flatten().to(device)
+  ind_ = ind_.expand(batch_size, M).clone().flatten().to(device)
   ind_ += ind.flatten()
   A_put[ind_] += A.view([batch_size * M] + As)
   A_put = A_put.view([batch_size, N] + As)
