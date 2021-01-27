@@ -75,8 +75,7 @@ class ControlGen:
         keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
         vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
 
-#         prepped_y_list = [dateSet_prep_sent(y) for y in y_list]
-        prepped_y_list = y_list
+        prepped_y_list = [dateSet_prep_sent(y) for y in y_list]
         y_batch = self.dataset.batch_sent(prepped_y_list)
         sentences = torch.from_numpy(y_batch['sentences']).to(self.config.device)
         sent_lens = torch.from_numpy(y_batch['sent_lens']).to(self.config.device)

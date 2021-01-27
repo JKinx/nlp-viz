@@ -25,6 +25,11 @@ def dateSet_filter_yz(y, z):
             zip(y, z)))
     y = list(map(lambda x : x[0], filtered))
     z = list(map(lambda x : x[1], filtered))
+    
+    years = [str(el) for el in range(2000,2021)]
+    for i in range(len(y)):
+        if y[i] in years:
+            z[i] = 3
     return y, z
 
 def dateSet_decode_out_unfiltered(dataset, ys, zs):
