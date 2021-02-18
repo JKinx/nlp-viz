@@ -172,9 +172,12 @@ def define_argument(config):
     nargs='?', const=True, default=config.stepwise_score)
 
   # pr
+    
   parser.add_argument(
     "--pr", type=str2bool, 
     nargs='?', const=True)
+  parser.add_argument(
+    "--num_pr_constraints", default=config.num_pr_constraints, type=int)
   parser.add_argument(
     "--pr_inc_lambd", default=config.pr_inc_lambd, type=float)
   parser.add_argument(

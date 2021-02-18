@@ -797,7 +797,7 @@ class LatentTemplateCRFAR(nn.Module):
     while not finished:
       if t>= max_len: break
       t += 1
-      if len(endnodes) >= number_required: break
+#       if len(endnodes) >= number_required: break
           
       for fstate_idx in range(len(fstates)):
         prev_nodes = []
