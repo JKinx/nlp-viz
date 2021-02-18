@@ -8,3 +8,4 @@ src/.vscode
 *nohup.out
 control_gen.egg-info
 dateSet
+e2e

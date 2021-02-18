@@ -45,7 +45,7 @@ class Config:
     self.num_epoch = 30
     self.batch_size_train = 500
     self.batch_size_eval = 100
-    self.print_interval = 20 
+    self.print_interval = 200 
     self.load_ckpt = False
     self.save_ckpt = False # if save checkpoints
     self.all_pretrained_path = ''
