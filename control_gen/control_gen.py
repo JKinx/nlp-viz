@@ -25,7 +25,10 @@ class ControlGen:
         batch_size = len(x_list)
 
         if template_list is None:
-            template_list = [[-1] for _ in range(batch_size)]
+            if self.data == "dateSet":
+                template_list = [[-1] for _ in range(batch_size)]
+            elif self.data == "e2e":
+                template_list = [[-1, 19, "_"] for _ in range(batch_size)]
 
         if self.data == "dateSet":
             kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
@@ -47,7 +50,10 @@ class ControlGen:
         batch_size = len(x_list)
 
         if template_list is None:
-            template_list = [[-1] for _ in range(batch_size)]
+            if self.data == "dateSet":
+                template_list = [[-1] for _ in range(batch_size)]
+            elif self.data == "e2e":
+                template_list = [[-1, 19, "_"] for _ in range(batch_size)]
         
         if self.data == "dateSet":
             kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
