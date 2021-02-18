@@ -36,8 +36,8 @@ class ControlGen:
             
         x_batch = self.dataset.batch_kv(kv_list)
 
-        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
-        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
 
         out_dict = self.model.model.infer2(keys, vals, template_list)
 
@@ -56,8 +56,8 @@ class ControlGen:
             
         x_batch = self.dataset.batch_kv(kv_list)
 
-        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
-        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
 
         out_dict = self.model.model.infer2(keys, vals, template_list)
         
@@ -93,8 +93,8 @@ class ControlGen:
             raise NotImplementedError("Dataset not supported")
             
         x_batch = self.dataset.batch_kv(kv_list)
-        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
-        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
         
         if self.data == "dateSet":
             prepped_y_list = [dateSet_prep_sent(y) for y in y_list]
@@ -103,9 +103,9 @@ class ControlGen:
             
         y_batch = self.dataset.batch_sent(prepped_y_list)
         
-        sentences = torch.from_numpy(y_batch['sentences']).to(self.config.device)
+        sentences = torch.from_numpy(y_batch['sentences']).to(self.config.device).long()
         if self.data == "e2e":
-            sentences = dlex(sentences, keys, vals)
+            sentences = dlex(sentences, keys, vals).long()
             
         sent_lens = torch.from_numpy(y_batch['sent_lens']).to(self.config.device)
 
@@ -200,8 +200,8 @@ class ControlGen:
         kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
         x_batch = self.dataset.batch_kv(kv_list)
 
-        keys = torch.from_numpy(x_batch['keys']).to(self.config.device)
-        vals = torch.from_numpy(x_batch['vals']).to(self.config.device)
+        keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
+        vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
 
         return self.model.model.ibeam_init(keys, vals)
     
