@@ -1,6 +1,6 @@
 import torch
 
-def dlex(sent_lst, keys_lst, vals_lst):
+def e2e_dlex(sent_lst, keys_lst, vals_lst):
     sent_dlex_lst = []
     for sent, keys, vals in zip(sent_lst, keys_lst, vals_lst):
         sent_dlex = []

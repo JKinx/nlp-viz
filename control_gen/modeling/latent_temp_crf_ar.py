@@ -17,6 +17,8 @@ import operator
 
 from .torch_struct import LinearChainCRF as LC
 
+from .fst import init_fs, resolve_fs
+
 class LatentTemplateCRFAR(nn.Module):
   """The latent template CRF autoregressive version, table to text setting"""
 
@@ -118,7 +120,7 @@ class LatentTemplateCRFAR(nn.Module):
     return kv_emb, kv_enc, kv_mask
     
   def forward(self, keys, vals, 
-    sentences, sent_lens, tau, x_lambd, return_grad=False, zcs=None):
+    sentences, sent_lens, sent_full, tau, x_lambd,  return_grad=False, zcs=None):
     """Forward pass, first run the inference network, then run the decoder
     
     Args:
@@ -208,6 +210,13 @@ class LatentTemplateCRFAR(nn.Module):
       self.z_embeddings, self.gumbel_st)
 
     # decoding
+    if self.config.dataset == "dateSet":
+        sentences = sent_full
+    elif sent.config.dataset == "e2e":
+        sentences = sentences
+    else:
+        raise NotImplementedError
+        
     sentences = sentences[:, : max_len]
     p_log_prob, _, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
       z_sample_ids, z_sample_emb, sent_lens,
@@ -778,42 +787,47 @@ class LatentTemplateCRFAR(nn.Module):
     # beam vars
     beam_width = 2 # for y
     beam_w_ = 2 # for z
-#     beam_width = 5 # for y
-#     beam_w_ = 5 # for z
     topk = 5
     #     max_len = self.max_dec_len
     max_len = 18
     window_size = 3
     
     endnodes = []
-    number_required = min((topk + 1), topk - len(endnodes))
-      
-    fstates = self.init_fstates(template)
+    
+    # initialize fstates
+    fs_dict = init_fs()
+    resolve_fs(template, fs_dict, self.config._dataset)
+    num_fs = fs_dict["counter"] + 1
+    fss = fs_dict["fss"]
   
     t = 0
     break_flag = False
     finished = False
-      
+    
+    node = {'h': state_i, 'prevNode': None, 'wordid': init_wordid,
+                        'logp': -init_score, 'leng': 1, 
+                        'state_id': init_state_id, 'inp': inp_i, 
+                        "fstate_idx" : 0}
+    fss[0]["nodes"] = [(-node['logp'], node)]
+    
     while not finished:
       if t>= max_len: break
       t += 1
-#       if len(endnodes) >= number_required: break
           
-      for fstate_idx in range(len(fstates)):
+      for fstate_idx in range(num_fs):
+        # current state
+        fs = fss[fstate_idx]
+        # nodes coming from preceding fsm states
         prev_nodes = []
-        prev_fstate_count = 0
-        
-        if t == 1 and fstate_idx == 0:
-          prev_fstate_count += 1
-          node = {'h': state_i, 'prevNode': None, 'wordid': init_wordid, 'logp': -init_score, 
-                  'leng': 1, 'state_id': init_state_id, 'inp': inp_i, "fstate_idx" : fstate_idx}
-          prev_nodes.append((-node['logp'], node))
-          
+        prev_fstate_count = 0   
+
+        # nodes generated in this step       
         nextnodes = []
-      
-        for prev_fstates in fstates[fstate_idx]["prev_fstates"]:
+        
+        # collect nodes
+        for prev_fs in fs["prev"]:
           prev_fstate_count += 1
-          prev_nodes += fstates[prev_fstates]["nodes"]
+          prev_nodes += fss[prev_fs]["nodes"]
         prev_nodes = sorted(prev_nodes, key=lambda x: x[0])
         
         for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
@@ -827,31 +841,30 @@ class LatentTemplateCRFAR(nn.Module):
             else:
               continue
           
-          dec_out, decoder_hidden = self.p_decoder(n_top['inp'].contiguous(), n_top['h'], 
-                                       mem_emb_i, mem_mask_i)
+          # decoder states
+          dec_out, decoder_hidden = self.p_decoder(n_top['inp'].contiguous(), 
+            n_top['h'], mem_emb_i, mem_mask_i)
           dec_out = dec_out[0]
           
           z_logits = self.p_z_proj(dec_out)
           
+          # shape: bsz X state_vocab
           state_logp = torch.log_softmax(z_logits, dim=-1)
           
-          prev_state = n_top["state_id"]
-          prev_word = n_top["wordid"]
-          
-          if prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
-            if fstates[fstate_idx]["fixed"] and fstates[fstate_idx]["state_vocab"] != prev_state:
-              continue
-#             if not fstates[fstate_idx]["fixed"] and prev_state in self.locked_zs and prev_word != self.key_ys[prev_state]:
-            state_id = prev_state
-            log_prob = state_logp[:,state_id:state_id+1]
-            indexes = torch.tensor([[[state_id]]]).to(self.device)
-          else: 
-            if fstates[fstate_idx]["fixed"]:
-              state_id = fstates[fstate_idx]["state_vocab"]
+          # z is being controlled
+          if fs["yz"] == "z":
+            if fs["type"] == "neg":
+              state_logp[:, fs["val"]] = float("-Inf")
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            elif fs["val"] == -1:
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            else:
+              state_id = fs["val"]
               log_prob = state_logp[:,state_id:state_id+1]
               indexes = torch.tensor([[[state_id]]]).to(self.device)
-            else:
-              log_prob, indexes = torch.topk(state_logp, beam_w_)
+          # y is being controlled. keep all z
+          else:
+            log_prob, indexes = torch.topk(state_logp, state_logp.shape[1]) 
 
           for new_k in range(len(indexes.view(-1))):
             decoded_ts = indexes.view(-1)[new_k]
@@ -869,17 +882,26 @@ class LatentTemplateCRFAR(nn.Module):
 
               out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
               x_logits = (out_prob + 1e-10).log()
-              
-            if not fstates[fstate_idx]["exit"]:
+            
+            # make eos invalid if not exit state
+            if not fs["exit"]:
               x_logits[:,self.end_id] = float("-Inf")
               
             temp_wordlp = torch.log_softmax(x_logits, dim=-1)
             
-            if fstates[fstate_idx]["exit"] and (fstates[fstate_idx]["fixed"] or fstates[fstate_idx]["pholder"]):
-              log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
-              indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
+            if fs["yz"] == "z":
+              # we require the end state to not have any loops and force eos
+              # + ? * not allowed
+              if fs["exit"]:
+                log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
+                indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
+              else:
+                log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
+            # if y is controlled, force the word
             else:
-              log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
+              word_id = fs["val"]
+              log_prob_w = temp_wordlp[:,word_id:word_id+1]
+              indexes_w = torch.tensor([[[word_id]]]).to(self.device)
             
             temp_ww = []
             temp_pp = []  
@@ -907,7 +929,7 @@ class LatentTemplateCRFAR(nn.Module):
               if node['wordid'] == self.end_id and node['prevNode'] != None:
                 endnodes.append((score, node))
                 continue
-              if node["leng"] >= max_len and fstate_idx == len(fstates)-1:
+              if node["leng"] >= max_len and fs["exit"]:
                 endnodes.append((score, node))
                 continue
               else:
@@ -919,54 +941,17 @@ class LatentTemplateCRFAR(nn.Module):
           next_nodes.append((score, nn_))
 
         next_nodes = sorted(next_nodes, key=lambda x: x[0])
+        
+        # not sure what this condition does
+#         if next_nodes != [] and fstate_idx == len(fstates) - 1 and next_nodes[0][1]["wordid"] == self.end_id:
+#           finished = True
 
-        if next_nodes != [] and fstate_idx == len(fstates) - 1 and next_nodes[0][1]["wordid"] == self.end_id:
-          finished = True
-
-        fstates[fstate_idx]["next_nodes"] = next_nodes
+        fss[fstate_idx]["next_nodes"] = next_nodes
           
-      for fstate_idx in range(len(fstates)):
-        fstates[fstate_idx]["nodes"] = fstates[fstate_idx]["next_nodes"]
+      for fstate_idx in range(num_fs):
+        fss[fstate_idx]["nodes"] = fss[fstate_idx]["next_nodes"]
         
     return endnodes
-
-
-  def init_fstates(self, template):
-    fstates = []
-    plus_starts = []
-    
-    count = 0
-    for i in range(len(template)):
-      if template[i] == "(":
-        assert template[i+1] != ")"
-        plus_starts.append(len(fstates))
-        continue
-      
-      if template[i] == ")":
-        assert len(plus_starts) > 0
-        start_id = plus_starts.pop()
-        fstates[start_id]["prev_fstates"].append(len(fstates) - 1)
-        continue
-          
-      fstate = {}
-      fstate["pholder"] = template[i] == "_"
-      fstate["fixed"] = template[i] not in [-1, "_"]
-      fstate["state_vocab"] = template[i]
-      fstate["exit"] = i == (len(template) - 1)
-
-      fstate["prev_fstates"] = []
-      if not (fstate["fixed"] or fstate["pholder"]):
-        fstate["prev_fstates"].append(count)
-      if count != 0:
-        fstate["prev_fstates"].append(count-1)
-
-      fstate["nodes"] = []
-      fstates.append(fstate)
-      count += 1
-        
-    assert plus_starts == []
-    
-    return fstates
 
 
   def prepare_dec_io(self, 

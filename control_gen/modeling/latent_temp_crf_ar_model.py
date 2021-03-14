@@ -34,6 +34,8 @@ class LatentTemplateCRFARModel(FTModel):
   def train_step(self, batch, n_iter, ei, bi, schedule_params):
     model = self.model
     sentences = torch.from_numpy(batch['sent_dlex']).to(self.device)
+    
+    sent_full = torch.from_numpy(batch['sentences']).to(self.device)
 
     model.zero_grad()
     loss, out_dict = model(
@@ -41,10 +43,11 @@ class LatentTemplateCRFARModel(FTModel):
       vals=torch.from_numpy(batch['vals']).to(self.device),
       sentences=sentences,
       sent_lens=torch.from_numpy(batch['sent_lens']).to(self.device),
+      sent_full = sent_full,
       tau=schedule_params['tau'], 
       x_lambd=schedule_params['x_lambd'],
       return_grad=False,
-      zcs=torch.from_numpy(batch['zcs']).to(self.device),
+      zcs=torch.from_numpy(batch['zcs']).to(self.device)
       )
 
     loss.backward()

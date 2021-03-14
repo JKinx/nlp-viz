@@ -2,6 +2,7 @@
 the dateSet dataset
 """
 from num2words import num2words
+import torch
 
 def dateSet_tuple_to_kvs(entry):
     day, month, year = entry
@@ -20,19 +21,8 @@ def dateSet_tuple_to_kvs(entry):
     return [("_day_0", day0), ("_day_1", day1), ("_month_0", month0), 
             ("_year_0", year0)]
 
-def dateSet_filter_yz(y, z):
-    filtered = list(filter(lambda x : not("start" in x[0] or "end" in x[0]),
-            zip(y, z)))
-    y = list(map(lambda x : x[0], filtered))
-    z = list(map(lambda x : x[1], filtered))
-    
-    years = [str(el) for el in range(2000,2021)]
-    for i in range(len(y)):
-        if y[i] in years:
-            z[i] = 3
-    return y, z
 
-def dateSet_decode_out_unfiltered(dataset, ys, zs):
+def dateSet_decode_out(dataset, ys, zs):
     batch_size = len(ys)
     sents = []
     states = []
@@ -44,57 +34,34 @@ def dateSet_decode_out_unfiltered(dataset, ys, zs):
 
     return sents, states
 
-def dateSet_decode_out(dataset, ys, zs):
-    batch_size = len(ys)
-    sents = []
-    states = []
-
-    for idx in range(batch_size):
-        sent = [dataset.id2word[el] for el in ys[idx]]
-        sentence, state = dateSet_filter_yz(sent, zs[idx])
-        sents.append(sentence)
-        states.append(state)
-
-    return sents, states
 
 months = ["january", "february", "march", "april", "may", "june", "july", 
           "august", "september", "october", "november", "december"]
 days_numerical = [num2words(n).replace("-", " ") for n in range(1, 32)]
 days_ordinal = [num2words(n, ordinal=True).replace("-", " ") 
                     for n in range(1, 32)]
+days = []
+for day in days_ordinal + days_numerical:
+    days += day.split()
+days = list(set(days))
+years = [str(year) for year in range(2000,2021)]
 
-def dateSet_prep_sent(sent):
-    sent_len = len(sent)
-
-    i = 0 
-
-    prepped_sent = []
-    while i < sent_len:
-        word = sent[i]
-        
-        if word in months:
-            prepped_sent += ["_mstart_", word, "_mend_"]
-            i += 1
-        elif word == "twenty" or word == "thirty":
-            next_word = sent[i + 1]
-
-            if next_word in days_ordinal:
-                prepped_sent += ["_odstart_", word, next_word, "_odend_"]
-                i += 2
-            elif next_word in days_numerical:
-                prepped_sent += ["_ndstart_", word, next_word, "_ndend_"]
-                i += 2
+def dateSet_dlex(sent_lst, dataset):
+    day = dataset.word2id["_day_"]
+    month = dataset.word2id["_month_"]
+    year = dataset.word2id["_year_"]
+    sent_dlex_lst = []
+    for sent in sent_lst:
+        sent_dlex = []
+        for w_id in sent:
+            w = dataset.id2word[w_id.item()]
+            if w in years:
+                sent_dlex.append(year)
+            elif w in months:
+                sent_dlex.append(month)
+            elif w in days:
+                sent_dlex.append(day)
             else:
-                prepped_sent += ["_ndstart_", word, "_ndend_"]
-                i += 1
-        elif word in days_numerical:
-            prepped_sent += ["_ndstart_", word, "_ndend_"]
-            i += 1
-        elif word in days_ordinal:
-            prepped_sent += ["_odstart_", word, "_odend_"]
-            i += 1
-        else:
-            prepped_sent.append(word)
-            i += 1
-
-    return prepped_sent
+                sent_dlex.append(w_id)
+        sent_dlex_lst.append(torch.tensor(sent_dlex).to(sent.device))
+    return torch.stack(sent_dlex_lst)

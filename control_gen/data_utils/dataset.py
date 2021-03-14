@@ -11,6 +11,8 @@ from . import nlp_pipeline as nlpp
 
 import pickle
 
+from num2words import num2words
+
 def normalize_set(dset, word2id, max_sent_len, max_mem_len, word2id_zcs):
   """Normalize the train/ dev/ test set
   
@@ -60,6 +62,17 @@ def normalize_kv(data_kvs, word2id, max_mem_len):
 def normalize_sent(data_sents, word2id, max_sent_len):
     return nlpp.normalize(data_sents, word2id, max_sent_len, add_start_end=False)
     
+months = ["january", "february", "march", "april", "may", "june", "july", 
+          "august", "september", "october", "november", "december"]
+days_numerical = [num2words(n).replace("-", " ") for n in range(1, 32)]
+days_ordinal = [num2words(n, ordinal=True).replace("-", " ") 
+                    for n in range(1, 32)]
+days = []
+for day in days_ordinal + days_numerical:
+    days += day.split()
+days = list(set(days))
+
+years = [str(year) for year in range(2000,2021)]
 
 def read_data(dpath):
   """Read the raw e2e data
@@ -98,15 +111,26 @@ def read_data(dpath):
     s = word_tokenize(s)
 
     st = []
-    for w in s:
-      in_table = False
-      for k, v in t:
-        if(w == v):
-          st.append(k)
-          in_table = True
-          break
-      if(in_table == False):
-        st.append(w)
+    if "dateSet" in dpath:
+        for w in s:
+            if w in years:
+                st.append("_year_")
+            elif w in months:
+                st.append("_month_")
+            elif w in days:
+                st.append("_day_")
+            else:
+                st.append(w)
+    else:
+        for w in s:
+          in_table = False
+          for k, v in t:
+            if(w == v):
+              st.append(k)
+              in_table = True
+              break
+          if(in_table == False):
+            st.append(w)
         
     # z_contraints
     zc = l[2].split(" ")
@@ -229,6 +253,8 @@ class Dataset(DatasetBase):
       train_keys.extend(keys)
       vals = [v for _, v in tb]
       train_vals.extend(vals)
+    if "dateSet" in self.data_path["train"]:
+        train_keys += ["_day_", "_month_", "_year_"]
     # join key vocab and the word vocab, but keep a seperate key dict
     self.word2id, self.id2word, self.key2id, self.id2key =\
       nlpp.extend_vocab_with_keys(word2id, id2word, train_keys)
