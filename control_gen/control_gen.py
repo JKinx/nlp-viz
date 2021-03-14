@@ -28,7 +28,7 @@ class ControlGen:
 
         if template_list is None:
             if self.data == "dateSet":
-                template_list = ["+.;" for _ in range(batch_size)]
+                template_list = ["+.;.;" for _ in range(batch_size)]
             elif self.data == "e2e":
                 template_list = ["+.;19;.;" for _ in range(batch_size)]
         
@@ -98,38 +98,30 @@ class ControlGen:
         return self.get_z_batched([x],[y])[0]
     
     def transfer_style(self, x0, y0, x):
-        raise NotImplementedError
-#         template0 = self.get_unfiltered_z_batched([x0], [y0])[0][0]
-#         if self.data == "dateSet":
-#             template0[-2] = 3
+        template0 = self.get_z(x0, y0)
         
-#         template = []
+        template = ""
         
-#         if self.data == "dateSet":
-#             specials = [0,1,2]
-#         elif self.data == "e2e":
-#             specials = list(range(8))
+        if self.data == "dateSet":
+            specials = [0,1,2]
+        elif self.data == "e2e":
+            specials = list(range(8))
             
-#         i = 0
-#         while i < len(template0):
-#             state = template0[i]
-            
-#             if state in specials:
-#                 template.append("(")
-#                 template.append(state)
-#                 template.append(")")
-#                 while template0[i] == state:
-#                     i += 1
-#             else:
-#                 template.append(state)
-#                 i += 1
+        i = 0
+        while i < len(template0):
+            state = template0[i]
+            if state in specials:
+                template += "+" + str(state) + ";"
+                while template0[i] == state:
+                    i += 1
+            else:
+                template += str(state) + ";"
+                i += 1
                 
-#         template.append("_")
-# #         print(template)
-        
-# #         out = self.get_yz(x, template)
-#         return out["y"]
-        return
+        template += ".;"
+
+        out = self.get_yz(x, template)
+        return out["y"]
     
     def decode_out(self, pred_y, pred_z):
         batch_size = len(pred_y)
