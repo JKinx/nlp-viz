@@ -17,15 +17,16 @@ model = ControlGen(model_path = args.model,
                       device=args.device)
 
 x = (13, 6, 2020)
-template_list = [[7,9,0,-1,2,-1,3,-1],
-                 [9,9,0,-1,2,-1,9,-1,3,-1],
-                 [7,9,2,-1,0,-1,4,-1,3,-1],
-                 [9,9,2,-1,0,-1,9,-1,3,-1],
-                 [7,9,8,1,-1,2,-1,4,-1,3,-1],
-                 [9,9,8,1,-1,2,-1,9,-1,3,-1],
-                 [7,9,2,-1,1,-1,4,-1,3,-1],
-                 [9,9,2,-1,1,-1,9,-1,3,-1],
+template_list = ["9,9,+0,2,3,8,.,",
+                 "9,9,2,+0,4,3,8,.,",
+                 "9,9,+0,2,.,+.,3,8,.,",
+                 "9,9,2,+0,.,+.,3,8,.,",
+                 "9,9,7,+1,.,2,4,3,8,.,",
+                 "9,9,2,7,+1,4,3,8,.,",
+                 "9,9,2,7,+1,.,+.,3,8,.,",
+                 "9,9,7,+1,.,2,.,+.,3,8,.,"
                 ]
+template_list = [template.replace(",", ";") for template in template_list]
 y = ['the', 'date', 'is', 'the', 'thirteen', 'of', 'june', ',', '2020', '.']
 
 print("Testing " + args.api + " for " + args.model)
@@ -45,7 +46,7 @@ elif args.api == "get_yz_templated":
     print()
     print("y: " + " ".join(out["y"]))
     print()
-    print("z template: " + " ".join([str(el) for el in template]))
+    print("z template: " + template)
     print()
     print("z: " + " ".join([str(el) for el in out["z"]]))   
 elif args.api == "get_z":
