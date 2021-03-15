@@ -4,7 +4,7 @@ import argparse
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--model', type=str, required=True, help='Model Name')
 parser.add_argument('--api', type=str, required=True, help='Api Name', choices=["get_yz", "get_yz_templated",  "get_z"])
-parser.add_argument('--template_id', type=int, help='id of template', default=-1, choices=[0,1,2,3,4,5,6,7])
+parser.add_argument('--template_id', type=int, help='id of template', default=-1, choices=[0,1,2,3,4,5,6,7,9])
 parser.add_argument('--device', default="cuda", help='device for model')
 args = parser.parse_args()
 
@@ -17,16 +17,17 @@ model = ControlGen(model_path = args.model,
                       device=args.device)
 
 x = (13, 6, 2020)
-template_list = ["9,9,+0,2,3,8,.,",
-                 "9,9,2,+0,4,3,8,.,",
-                 "9,9,+0,2,.,+.,3,8,.,",
-                 "9,9,2,+0,.,+.,3,8,.,",
-                 "9,9,7,+1,.,2,4,3,8,.,",
-                 "9,9,2,7,+1,4,3,8,.,",
-                 "9,9,2,7,+1,.,+.,3,8,.,",
-                 "9,9,7,+1,.,2,.,+.,3,8,.,"
-                ]
-template_list = [template.replace(",", ";") for template in template_list]
+template_list = ['9;9;+0;2;3;8;.;',
+                 '9;9;2;+0;4;3;8;.;',
+                 '9;9;+0;2;.;+.;3;8;.;',
+                 '9;9;2;+0;.;+.;3;8;.;',
+                 '9;9;7;+1;.;2;4;3;8;.;',
+                 '9;9;2;7;+1;4;3;8;.;',
+                 '9;9;2;7;+1;.;+.;3;8;.;',
+                 '9;9;7;+1;.;2;.;+.;3;8;.;',
+                 '[it];[is];[the];+1;[of];2;[.];.;',
+                 '[the];[year];[is];3;[.];.;']
+
 y = ['the', 'date', 'is', 'the', 'thirteen', 'of', 'june', ',', '2020', '.']
 
 print("Testing " + args.api + " for " + args.model)
