@@ -17,7 +17,7 @@ import operator
 
 from .torch_struct import LinearChainCRF as LC
 
-from .fst import init_fs, resolve_fs
+from .fst import make_fst
 
 class LatentTemplateCRFAR(nn.Module):
   """The latent template CRF autoregressive version, table to text setting"""
@@ -795,8 +795,7 @@ class LatentTemplateCRFAR(nn.Module):
     endnodes = []
     
     # initialize fstates
-    fs_dict = init_fs()
-    resolve_fs(template, fs_dict, self.config._dataset)
+    fs_dict = make_fst(template, self.config._dataset)
     num_fs = fs_dict["counter"] + 1
     fss = fs_dict["fss"]
   
