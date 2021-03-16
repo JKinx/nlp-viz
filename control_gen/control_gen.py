@@ -20,6 +20,7 @@ class ControlGen:
         self.model.load_state_dict(loaded["model_state_dict"])
         self.model.to(self.config.device)
         self.model.eval()
+        self.cid2alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
         
         del loaded
 
@@ -28,9 +29,9 @@ class ControlGen:
 
         if template_list is None:
             if self.data == "dateSet":
-                template_list = ["+.;.;" for _ in range(batch_size)]
+                template_list = [".+." for _ in range(batch_size)]
             elif self.data == "e2e":
-                template_list = ["+.;19;.;" for _ in range(batch_size)]
+                template_list = [".+T." for _ in range(batch_size)]
         
         if self.data == "dateSet":
             kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
@@ -51,8 +52,9 @@ class ControlGen:
         
         out_list = []
         for i in range(batch_size):
+            alpha_zi = [self.cid2alpha[zid] for zid in pred_z[i]]
             out = {"y" : pred_y[i], 
-                   "z" : pred_z[i], 
+                   "z" : alpha_zi, 
                    "score" : out_dict["pred_score"][i]}
             out_list.append(out)
 
@@ -92,7 +94,11 @@ class ControlGen:
         out = self.model.model.posterior_infer(keys, vals, 
                         sentences, sent_lens)
         
-        return out
+        alpha_out = []
+        for zi in out:
+            alpha_out.append([self.cid2alpha[zid] for zid in zi])
+        
+        return alpha_out
 
     def get_z(self, x, y):
         return self.get_z_batched([x],[y])[0]
@@ -106,19 +112,20 @@ class ControlGen:
             specials = [0,1,2]
         elif self.data == "e2e":
             specials = list(range(8))
+        specials = [self.cid2alpha[special] for special in specials]
             
         i = 0
         while i < len(template0):
             state = template0[i]
             if state in specials:
-                template += "+" + str(state) + ";"
+                template += str(state) + "+"
                 while template0[i] == state:
                     i += 1
             else:
-                template += str(state) + ";"
+                template += str(state)
                 i += 1
                 
-        template += ".;"
+        template += "."
 
         out = self.get_yz(x, template)
         return out["y"]
