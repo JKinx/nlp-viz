@@ -4,7 +4,7 @@ import argparse
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('--model', type=str, required=True, help='Model Name')
 parser.add_argument('--api', type=str, required=True, help='Api Name', choices=["get_yz", "get_yz_templated",  "get_z", "transfer_style"])
-parser.add_argument('--template_id', type=int, help='id of template', default=-1, choices=[0,1,2,3,4,5,6,7,8,9])
+parser.add_argument('--template_id', type=int, help='id of template', default=-1, choices=[0,1,2,3,4,5,6,7,8,9,10])
 parser.add_argument('--style_id', type=int, help='id of style', default=-1, choices=[0,1,2,3,4,5,6,7])
 parser.add_argument('--device', default="cuda", help='device for model')
 args = parser.parse_args()
@@ -33,7 +33,8 @@ template_list = ['JJA+CDI.',
                  'JJCHB+..+DI.',
                  'JJHB+.C..+DI.',
                  '[it][is][the]B+[of]C[.].',
-                 '[the][year][is]D[.].']
+                 '[the][year][is]D[.].',
+                 '.*A+CD..']
 
 y = ['the', 'date', 'is', 'the', 'thirteen', 'of', 'june', ',', '2020', '.']
 y_list = [['today', 'is', 'twenty', 'two', 'june', '2020', '.'],

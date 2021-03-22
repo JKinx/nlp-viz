@@ -871,6 +871,7 @@ class LatentTemplateCRFAR(nn.Module):
               
             z_emb = self.z_embeddings(torch.tensor([decoded_ts]).to(self.device))
             dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
+            
             x_logits = self.p_decoder.output_proj(dec_intermediate)
             lm_prob = F.softmax(x_logits, dim=-1)
               
