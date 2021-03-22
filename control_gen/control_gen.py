@@ -70,7 +70,7 @@ class ControlGen:
         if template is None:
             template_list = None
         else:
-            template_list = [template]
+            template_list = [template + "."]
         return self.get_yz_batched([x], template_list)[0]
     
     def get_z_batched(self, x_list, y_list):

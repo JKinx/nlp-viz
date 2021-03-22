@@ -24,17 +24,17 @@ x0 = (22, 6, 2020)
 x1 = (7, 12, 2010)
 x2 = (26, 7, 2001)
 x3 = (31, 8, 2005)
-template_list = ['JJA+CDI.',
-                 'JJCA+EDI.',
-                 'JJA+C..+DI.',
-                 'JJCA+..+DI.',
-                 'JJHB+.CEDI.',
-                 'JJCHB+EDI.',
-                 'JJCHB+..+DI.',
-                 'JJHB+.C..+DI.',
-                 '[it][is][the]B+[of]C[.].',
-                 '[the][year][is]D[.].',
-                 '.*A+CD..']
+template_list = ['JJA+CDI',
+                 'JJCA+EDI',
+                 'JJA+C..+DI',
+                 'JJCA+..+DI',
+                 'JJHB+.CEDI',
+                 'JJCHB+EDI',
+                 'JJCHB+..+DI',
+                 'JJHB+.C..+DI',
+                 '[it][is][the]B+[of]C[.]',
+                 '[the][year][is]D[.]',
+                 '.*A+CD.']
 
 y = ['the', 'date', 'is', 'the', 'thirteen', 'of', 'june', ',', '2020', '.']
 y_list = [['today', 'is', 'twenty', 'two', 'june', '2020', '.'],
