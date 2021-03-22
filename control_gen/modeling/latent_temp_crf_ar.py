@@ -565,13 +565,14 @@ class LatentTemplateCRFAR(nn.Module):
     kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
 
     # decoding 
-    pred_y, pred_z, pred_score, beam_trees, bts = self.decode_infer2(vals, kv_emb,
+    pred_y, pred_z, pred_score, beam_trees, bts, bid = self.decode_infer2(vals, kv_emb,
       kv_enc, kv_mask, templates)
     out_dict['pred_y'] = pred_y
     out_dict['pred_z'] = pred_z
     out_dict['pred_score'] = pred_score
     out_dict["beam_trees"] = beam_trees
     out_dict["bts"] = bts
+    out_dict["regex_alignment"] = bid
     return out_dict
 
   def decode_infer2(self, mem, mem_emb, mem_enc, mem_mask, templates):    
@@ -580,6 +581,7 @@ class LatentTemplateCRFAR(nn.Module):
     decoded_batch = []
     decoded_score = []
     decoded_states = []
+    decoded_bid = []
     beam_trees = []
     bts = []
 
@@ -610,31 +612,35 @@ class LatentTemplateCRFAR(nn.Module):
       beam_trees.append(beam_tree)
       bts.append(beam_tree.get_bt(bs_init))
 
-      utterances_w, utterances_s, scores_result = self.endnodes_to_utterances(
+      utterances_w, utterances_s, scores_result, utterances_b = self.endnodes_to_utterances(
         endnodes)
         
       decoded_batch.append(utterances_w)
       decoded_states.append(utterances_s)
       decoded_score.append(scores_result)
+      decoded_bid.append(utterances_b)
     
     pred_y = []
     pred_z = []
     pred_score = []
+    bid = []
     for batch_idx in range(len(decoded_batch)):
         if decoded_batch[batch_idx] == []:
             pred_y.append([])
             pred_z.append([])
             pred_score.append(-float("inf"))
+            bid([])
         else:
             pred_y.append(decoded_batch[batch_idx][0][1:-1])
             pred_z.append(decoded_states[batch_idx][0][1:-1])
             pred_score.append(decoded_score[batch_idx][0])
+            bid.append(decoded_bid[batch_idx][0][1:-1])
             
-    return pred_y, pred_z, pred_score, beam_trees, bts
+    return pred_y, pred_z, pred_score, beam_trees, bts, bid
 
   def beam_tree_act(self, bs_init, beam_tree):
     endnodes = self.beam_search(bs_init, beam_tree) 
-    utterances_w, utterances_s, scores_result = self.endnodes_to_utterances(
+    utterances_w, utterances_s, scores_result, bids = self.endnodes_to_utterances(
         endnodes)
 
     out_dict = {}
@@ -646,11 +652,13 @@ class LatentTemplateCRFAR(nn.Module):
       out_dict['pred_z'] = pre_z
       out_dict['pred_score'] = - bs_init["logp"]
       out_dict["bt"] = []
+      out_dict["regex_alignment"] = - bs_init["fs_idx"][0][1]
     else:
-      out_dict['pred_y'] = pre_y + utterances_w[0][1:-1]
-      out_dict['pred_z'] = pre_z + utterances_s[0][1:-1]
+      out_dict['pred_y'] = utterances_w[0][1:-1]
+      out_dict['pred_z'] = utterances_s[0][1:-1]
       out_dict['pred_score'] = scores_result[0]
       out_dict["bt"] = beam_tree.get_bt(bs_init)
+      out_dict["regex_alignment"] = bids[0][1:-1]
     
     return out_dict
 
@@ -696,12 +704,12 @@ class LatentTemplateCRFAR(nn.Module):
     return ys, probs
 
   def init_bst(self, bs_init, beam_tree, fss, mem_emb, mem_mask, mem):
-    if bs_init["fs_idx"] == 0:
+    if bs_init["fs_idx"][0] == 0:
         node = {'h': bs_init["h"], 'inp': bs_init["inp"], 'prevNode': None, 
                 'word_id': -1, "ys" : bs_init["prev_ys"] + [-1],
                 'state_id': -1, "zs" : bs_init["prev_zs"] + [-1],
                 'logp': bs_init["logp"], 'leng': bs_init["leng"] + 1, 
-                "fs_idx" : 0}
+                "fs_idx" : 0, "bids" : list(bs_init["fs_idx"][1])}
         beam_tree.update_node(bs_init, node)
         fss[0]["nodes"] = [(-node['logp'], node)]
         return 
@@ -747,11 +755,13 @@ class LatentTemplateCRFAR(nn.Module):
             "leng" : bs_init["leng"] + 1, 
             "logp" : bs_init["logp"] + log_ps + log_pw,
             "fs_idx" : bs_init["fs_idx"]}
-
-    beam_tree.update_node(bs_init, node)
     
+    print(bs_init["fs_idx"])
     for fs_idx in bs_init["fs_idx"]:
-      fss[fs_idx]["nodes"] = [(-node['logp'], node)] 
+      node["fs_idx"] = fs_idx[0]
+      node["bids"] = list(fs_idx[1])
+      beam_tree.update_node(bs_init, node)
+      fss[fs_idx[0]]["nodes"] = [(-node['logp'], node)] 
 
   def beam_search(self, bs_init, beam_tree):
     mem_emb = beam_tree.mem_emb
@@ -895,11 +905,12 @@ class LatentTemplateCRFAR(nn.Module):
               
               word_id = decoded_tw.item()
               state_id = decoded_ts.item()
-              node = {'h': decoder_hidden, 'inp': inp, 'prevNode': n_top, 
+              node = {'h': decoder_hidden, 'inp': inp, 'prevNode': {}, 
                       'word_id': word_id, 'ys' : n_top["ys"] + [word_id],
                       'state_id': state_id, 'zs' : n_top["zs"] + [state_id],
                       'logp': n_top['logp'] + log_ps + log_pw, 
-                      'leng': n_top['leng'] + 1, "fs_idx" : fs_idx}
+                      'leng': n_top['leng'] + 1, "fs_idx" : fs_idx,
+                      "bids" : n_top["bids"] + [fs["bid"]]}
               beam_tree.update_node(bs_init, node)
 
               score = -node['logp']
@@ -931,25 +942,18 @@ class LatentTemplateCRFAR(nn.Module):
     utterances_w = []
     utterances_s = []
     scores_result = []
+    utterances_b = []
   
     for score, n in sorted(endnodes, key=operator.itemgetter(0)):
-      utterance_w = []
-      utterance_s = []
-      utterance_w.append(n['word_id'])
-      utterance_s.append(n['state_id'])
-      # back trace
-      while n['prevNode'] != None:
-        n = n['prevNode']
-        utterance_w.append(n['word_id'])
-        utterance_s.append(n['state_id'])
-
-      utterance_w = utterance_w[::-1]
-      utterance_s = utterance_s[::-1]
+      utterance_w = n["ys"][1:]
+      utterance_s = n["zs"][1:]
+      utterance_b = n["bids"][1:] 
       utterances_w.append(utterance_w)
       utterances_s.append(utterance_s)
+      utterances_b.append(utterance_b)
       scores_result.append(score)
 
-    return utterances_w, utterances_s, scores_result
+    return utterances_w, utterances_s, scores_result, utterances_b
 
   def prepare_dec_io(self, 
     z_sample_ids, z_sample_emb, sentences, x_lambd):

@@ -25,7 +25,7 @@ class BeamTree():
                    "logp" : self.logp[self.init_key],
                    "prev_zs" : [-2],
                    "prev_ys" : [-2],
-                   "fs_idx" : 0,
+                   "fs_idx" : (0,[-2, -1]),
                    "leng" : -1,
                    "key" : self.get_key([-2,-1], [-2,-1]),
                    "bt" :  True
@@ -106,10 +106,7 @@ class BeamTree():
 
         key = self.get_key(node["zs"], node["ys"])
         
-        if type(node["fs_idx"]) == list:
-            self.fs_idx_lst[key].update(node["fs_idx"])
-        else:
-            self.fs_idx_lst[key].add(node["fs_idx"])
+        self.fs_idx_lst[key].add((node["fs_idx"], tuple(node["bids"])))
 
         try:
             logp = self.logp[key]

@@ -125,15 +125,15 @@ def get_all(s):
 def init_fs():
     fs_dict = {"counter" : 0, "fss" : {}}
     init = {"id" : 0, "exit" : False, "type" : "init", "yz" : None,
-            "val": None, "prev" : [], "nodes" : []} 
+            "val": None, "prev" : [], "nodes" : [], "bid" : -1} 
     fs_dict["fss"][0] = init
     return fs_dict
 
-def make_fs(typ, yz, val, prev_lst, fs_dict):
+def make_fs(typ, yz, val, prev_lst, fs_dict, bid):
     fs_dict["counter"] += 1
     fs_id = fs_dict["counter"]
     fs = {"id" : fs_id, "exit" : False, "type" : typ, "yz" : yz, 
-          "val": val, "prev" : prev_lst, "nodes" : []}
+          "val": val, "prev" : prev_lst, "nodes" : [], "bid" : bid}
     fs_dict["fss"][fs_id] = fs
     return fs_id
 
@@ -141,22 +141,22 @@ def exit_fs(end_lst, fs_dict):
     for fs_id in end_lst:
         fs_dict["fss"][fs_id]["exit"] = True
         
-def make_base(tok, prev_lst, fs_dict, dataset):
+def make_base(tok, prev_lst, fs_dict, dataset, bid):
     yz, enc_tok = encode_tok(tok, dataset)
-    fs_id = make_fs("base", yz, enc_tok, dc(prev_lst), fs_dict)
+    fs_id = make_fs("base", yz, enc_tok, dc(prev_lst), fs_dict, bid)
     return fs_id
 
-def make_neg(tok, prev_lst, fs_dict, dataset):
+def make_neg(tok, prev_lst, fs_dict, dataset, bid):
     tok_lst = tok.split("|")
     enc_tok_lst = []
     for tok in tok_lst:
         yz, enc_tok = encode_tok(tok, dataset)
         assert yz == "z"
         enc_tok_lst.append(enc_tok)
-    fs_id = make_fs("neg", yz, enc_tok_lst, dc(prev_lst), fs_dict)
+    fs_id = make_fs("neg", yz, enc_tok_lst, dc(prev_lst), fs_dict, bid)
     return fs_id
 
-def resolve_fs(seq, prev_lst, fs_dict, dataset):
+def resolve_fs(seq, prev_lst, fs_dict, dataset, block_id = None):
     # break by | (OR operator)
     tok_lst = get_all_or(seq)
     
@@ -166,26 +166,37 @@ def resolve_fs(seq, prev_lst, fs_dict, dataset):
         
         # recurse is more than one token
         if len(and_lst) > 1:
+            if block_id is None:
+                bid = 0
+            else:
+                bid = block_id
             st_lst_lst = []
             for tok in and_lst:
                 st_lst, end_lst = resolve_fs(tok, prev_lst,
-                                         fs_dict, dataset)
+                                         fs_dict, dataset, bid)
                 st_lst_lst.append(st_lst)
                 prev_lst = dc(end_lst)
+                if block_id is None:
+                    bid += 1
             return dc(st_lst_lst[0]), dc(end_lst)
         
         tok = and_lst[0]
         typ, tok = get_type(tok)
         
+        if block_id is None:
+            bid = 0
+        else:
+            bid = block_id
+        
         if typ == "base":
-            fs_id = make_base(tok, prev_lst, fs_dict, dataset)
+            fs_id = make_base(tok, prev_lst, fs_dict, dataset, bid)
             return [fs_id], [fs_id]
         elif typ == "neg":
-            fs_id = make_neg(tok, prev_lst, fs_dict, dataset)
+            fs_id = make_neg(tok, prev_lst, fs_dict, dataset, bid)
             return [fs_id], [fs_id]
         else:
             st_lst, end_lst = resolve_fs(tok, prev_lst, 
-                                          fs_dict, dataset)
+                                          fs_dict, dataset, bid)
             if typ == "star":
                 # self loop
                 for fs_id in st_lst:
@@ -201,11 +212,15 @@ def resolve_fs(seq, prev_lst, fs_dict, dataset):
                 end_lst += prev_lst
             return st_lst, end_lst
     else:
+        if block_id is None:
+            bid = 0
+        else:
+            bid = block_id
         str_lst_lst = []
         end_lst_lst = []
         for tok in tok_lst:
             str_lst, end_lst = resolve_fs(tok, dc(prev_lst), 
-                                          fs_dict, dataset)
+                                          fs_dict, dataset, bid)
             str_lst_lst += str_lst
             end_lst_lst += end_lst
         return str_lst_lst, end_lst_lst

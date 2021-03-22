@@ -47,8 +47,8 @@ class ControlGen:
         out_dict = self.model.model.infer2(keys, vals, template_list)
         
         pred_y, pred_z = decode_yz(self.dataset, 
-                                            out_dict["pred_y"],
-                                            out_dict["pred_z"])
+                                  out_dict["pred_y"],
+                                  out_dict["pred_z"])
         pred_bt = decode_bt(self.dataset, out_dict["bts"])
         
         out_list = []
@@ -59,7 +59,9 @@ class ControlGen:
                    "beam_tree" : out_dict["beam_trees"][i],
                    "bt" : pred_bt[i],
                    "y_raw" : out_dict["pred_y"][i],
-                   "z_raw" : out_dict["pred_z"][i]}
+                   "z_raw" : out_dict["pred_z"][i],
+                   "regex_alignment" : out_dict["regex_alignment"][i]
+                  }
             out_list.append(out)
 
         return out_list
@@ -177,7 +179,8 @@ class ControlGen:
                "bt" : pred_bt[0],
                "y_raw" : out_dict["pred_y"],
                "z_raw" : out_dict["pred_z"],
-               "beam_tree" : bt}
+               "beam_tree" : bt,
+               "regex_alignment" : out_dict["regex_alignment"]}
         
         return out
 
