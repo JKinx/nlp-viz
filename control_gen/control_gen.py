@@ -2,6 +2,7 @@
 from .modeling import LatentTemplateCRFARModel
 from .data_utils.dateSet_helpers import *
 from .data_utils.e2e_helpers import *
+from .data_utils.helpers import *
 import torch
 import pickle
 
@@ -45,17 +46,20 @@ class ControlGen:
 
         out_dict = self.model.model.infer2(keys, vals, template_list)
         
-        if self.data == "dateSet":
-            pred_y, pred_z = dateSet_decode_out(self.dataset, out_dict["pred_y"], out_dict["pred_z"])
-        elif self.data == "e2e":
-            pred_y, pred_z = e2e_decode_out(self.dataset, out_dict["pred_y"], out_dict["pred_z"])
+        pred_y, pred_z = decode_yz(self.dataset, 
+                                            out_dict["pred_y"],
+                                            out_dict["pred_z"])
+        pred_bt = decode_bt(self.dataset, out_dict["bts"])
         
         out_list = []
         for i in range(batch_size):
-            alpha_zi = [self.cid2alpha[zid] for zid in pred_z[i]]
             out = {"y" : pred_y[i], 
-                   "z" : alpha_zi, 
-                   "score" : out_dict["pred_score"][i]}
+                   "z" : pred_z[i], 
+                   "score" : out_dict["pred_score"][i],
+                   "beam_tree" : out_dict["beam_trees"][i],
+                   "bt" : pred_bt[i],
+                   "y_raw" : out_dict["pred_y"][i],
+                   "z_raw" : out_dict["pred_z"][i]}
             out_list.append(out)
 
         return out_list
@@ -132,12 +136,7 @@ class ControlGen:
     
     def decode_out(self, pred_y, pred_z):
         batch_size = len(pred_y)
-        
-        if self.data == "dateSet":
-            pred_y, pred_z = dateSet_decode_out(self.dataset, pred_y, pred_z)
-        elif self.data == "e2e":
-            pred_y, pred_z = e2e_decode_out(self.dataset, pred_y, pred_z)
-        
+        pred_y, pred_z = decode_yz(self.dataset, pred_y, pred_z)
         out_list = []
         for i in range(batch_size):
             out = {"y" : pred_y[i], 
@@ -145,17 +144,40 @@ class ControlGen:
             out_list.append(out)
         return out_list
     
-    def ibeam_init(self, x_list):
-        batch_size = len(x_list)
-
-        kv_list = [dateSet_tuple_to_kvs(x) for x in x_list]
-        x_batch = self.dataset.batch_kv(kv_list)
-
-        keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
-        vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
-
-        return self.model.model.ibeam_init(keys, vals)
-    
-    def ibeam_act(self, ibeam_data, ibeam_key):
-        return self.model.model.ibeam_act(ibeam_data, ibeam_key)
+    def bt_probe(self, bt, key):
+        inp, h, mem_emb, mem_mask, mem = bt.get_prob_init(key)
+        probe_out = self.model.model.probe_bst(inp, h, mem_emb, mem_mask, mem)
         
+        num_z = len(probe_out[0])
+        options = []
+        for i in range(num_z):
+            for j in range(5):
+                option = {"z_raw" : i,
+                          "z" : self.cid2alpha[i],
+                          "y_raw" : probe_out[0][i][j], 
+                          "score" : probe_out[1][i][j]}
+                option["y"] = self.dataset.id2word[option["y_raw"]]
+                options.append(option)
+        
+        return options
+    
+    def bt_act(self, bt, key, y, z):
+        bs_init = bt.get_bs_init(key, z, y)
+        
+        out_dict = self.model.model.beam_tree_act(bs_init, bt)
+        
+        pred_y, pred_z = decode_yz(self.dataset, 
+                                   [out_dict["pred_y"]],
+                                   [out_dict["pred_z"]])
+        pred_bt = decode_bt(self.dataset, [out_dict["bt"]])
+        
+        out = {"y" : pred_y[0], 
+               "z" : pred_z[0], 
+               "score" : out_dict["pred_score"],
+               "bt" : pred_bt[0],
+               "y_raw" : out_dict["pred_y"],
+               "z_raw" : out_dict["pred_z"],
+               "beam_tree" : bt}
+        
+        return out
+

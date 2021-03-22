@@ -21,20 +21,6 @@ def dateSet_tuple_to_kvs(entry):
     return [("_day_0", day0), ("_day_1", day1), ("_month_0", month0), 
             ("_year_0", year0)]
 
-
-def dateSet_decode_out(dataset, ys, zs):
-    batch_size = len(ys)
-    sents = []
-    states = []
-
-    for idx in range(batch_size):
-        sent = [dataset.id2word[el] for el in ys[idx]]
-        sents.append(sent)
-        states.append(zs[idx])
-
-    return sents, states
-
-
 months = ["january", "february", "march", "april", "may", "june", "july", 
           "august", "september", "october", "november", "december"]
 days_numerical = [num2words(n).replace("-", " ") for n in range(1, 32)]

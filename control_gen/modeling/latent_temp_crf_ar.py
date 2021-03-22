@@ -18,6 +18,7 @@ import operator
 from .torch_struct import LinearChainCRF as LC
 
 from .fst import make_fst
+from .beamtree import BeamTree
 
 class LatentTemplateCRFAR(nn.Module):
   """The latent template CRF autoregressive version, table to text setting"""
@@ -273,7 +274,6 @@ class LatentTemplateCRFAR(nn.Module):
     # take average
     final_inc_loss = inc_loss.sum() / check.float().sum()
     final_exc_loss = exc_loss.sum() / (sent_lens.sum() - check.float().sum())
-#     final_loss = loss.sum() / sent_lens.sum()
     
     return final_inc_loss, final_exc_loss
 
@@ -565,33 +565,23 @@ class LatentTemplateCRFAR(nn.Module):
     kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
 
     # decoding 
-    pred_y, pred_z, pred_score = self.decode_infer2(vals, kv_emb, kv_enc,
-                                                      kv_mask, templates)
+    pred_y, pred_z, pred_score, beam_trees, bts = self.decode_infer2(vals, kv_emb,
+      kv_enc, kv_mask, templates)
     out_dict['pred_y'] = pred_y
     out_dict['pred_z'] = pred_z
     out_dict['pred_score'] = pred_score
+    out_dict["beam_trees"] = beam_trees
+    out_dict["bts"] = bts
     return out_dict
 
-  def decode_infer2(self, mem, mem_emb, mem_enc, mem_mask, templates):
-    """Inference
-
-    Args:
-      mem: torch.Tensor(), size=[batch, mem_len]
-      mem_emb: torch.Tensor(), size=[batch, mem_len, state_size]
-      mem_enc: torch.Tensor(), size=[batch, state_size]
-      mem_mask: torch.Tensor(), size=[batch, mem_len]
-    
-    Returns:
-      predictions_x: torch.Tensor(int), size=[batch, max_dec_len]
-      predictions_z: torch.Tensor(int), size=[batch, max_dec_len]
-    """
-    
+  def decode_infer2(self, mem, mem_emb, mem_enc, mem_mask, templates):    
     batch_size = mem.size(0)
     
     decoded_batch = []
     decoded_score = []
     decoded_states = []
-    decoded_copy = []
+    beam_trees = []
+    bts = []
 
 
     predictions_x, predictions_z = [], []
@@ -611,30 +601,17 @@ class LatentTemplateCRFAR(nn.Module):
       mem_i = mem[idx:idx+1]
     
       template = templates[idx]
-    
-      endnodes = self.beam_search(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template,
-                                 init_state_id = -1, init_wordid = self.start_id)
-        
-      utterances_w = []
-      utterances_s = []
-      scores_result = []
-    
-      for score, n in sorted(endnodes, key=operator.itemgetter(0)):
-        utterance_w = []
-        utterance_s = []
-        utterance_w.append(n['wordid'])
-        utterance_s.append(n['state_id'])
-        # back trace
-        while n['prevNode'] != None:
-          n = n['prevNode']
-          utterance_w.append(n['wordid'])
-          utterance_s.append(n['state_id'])
 
-        utterance_w = utterance_w[::-1]
-        utterance_s = utterance_s[::-1]
-        utterances_w.append(utterance_w)
-        utterances_s.append(utterance_s)
-        scores_result.append(score)
+      beam_tree = BeamTree(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template)
+      bs_init = beam_tree.init_bs_init()
+    
+      endnodes = self.beam_search(bs_init, beam_tree)
+
+      beam_trees.append(beam_tree)
+      bts.append(beam_tree.get_bt(bs_init))
+
+      utterances_w, utterances_s, scores_result = self.endnodes_to_utterances(
+        endnodes)
         
       decoded_batch.append(utterances_w)
       decoded_states.append(utterances_s)
@@ -653,137 +630,135 @@ class LatentTemplateCRFAR(nn.Module):
             pred_z.append(decoded_states[batch_idx][0][1:-1])
             pred_score.append(decoded_score[batch_idx][0])
             
-    return pred_y, pred_z, pred_score
+    return pred_y, pred_z, pred_score, beam_trees, bts
 
+  def beam_tree_act(self, bs_init, beam_tree):
+    endnodes = self.beam_search(bs_init, beam_tree) 
+    utterances_w, utterances_s, scores_result = self.endnodes_to_utterances(
+        endnodes)
 
-  def ibeam_init(self, keys, vals):
-    """ Interactive beam search initialization
-    """
-    assert keys.size(0) == 1
-
-    mem_i = vals
-    mem_emb_i, kv_enc, mem_mask_i = self.encode_kv(keys, vals)
-    state_i = self.init_state(kv_enc)
-    inp_i = self.embeddings(
-      torch.zeros(1).to(self.device).long() + self.start_id)
-
-    sequences = self.beam_extend(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, 
-                                 init_state_id = -1, init_wordid = self.start_id)
-
-    ibeam_data = {"key" : keys, "val" : vals, "mem_emb_i" : mem_emb_i,
-                  "mem_mask_i" : mem_mask_i, "mem_i" : mem_i}
-
-    z_list, y_list, score_list, cache, yz = self.extract_data([], [], sequences)
-
-    ibeam_data["cache"] = cache
-    ibeam_data["yz"] = yz
+    out_dict = {}
     
-    out_dict = {"z_list" : z_list,
-                "y_list" : y_list,
-                "score_list" : score_list
-               }
+    pre_z = bs_init["prev_zs"][2:] + [bs_init["z_id"]]
+    pre_y = bs_init["prev_ys"][2:] + [bs_init["y_id"]]
+    if utterances_s[0] == []:
+      out_dict['pred_y'] = pre_y
+      out_dict['pred_z'] = pre_z
+      out_dict['pred_score'] = - bs_init["logp"]
+      out_dict["bt"] = []
+    else:
+      out_dict['pred_y'] = pre_y + utterances_w[0][1:-1]
+      out_dict['pred_z'] = pre_z + utterances_s[0][1:-1]
+      out_dict['pred_score'] = scores_result[0]
+      out_dict["bt"] = beam_tree.get_bt(bs_init)
+    
+    return out_dict
+
+  def probe_bst(self, inp, h, mem_emb, mem_mask, mem):
+    num_z = self.latent_vocab_size
+
+    dec_out, decoder_hidden = self.p_decoder(inp, h, mem_emb, mem_mask)   
+    dec_out = dec_out[0]
+
+    # get log_probs for all z
+    z_logits = self.p_z_proj(dec_out)
+    
+    state_logp = torch.log_softmax(z_logits, dim=-1).view(num_z, -1)
+
+    # embed all z
+    all_z = torch.arange(num_z).to(self.device)
+    z_emb = self.z_embeddings(all_z)
+
+    # get y probs
+    dec_out = dec_out.expand(num_z, -1)
+    dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=-1))
+    x_logits = self.p_decoder.output_proj(dec_intermediate)
+    lm_prob = F.softmax(x_logits, dim=-1)
+
+    mem_emb = mem_emb.expand(num_z, -1, -1)
+    mem_mask = mem_mask.expand(num_z, -1)
+    mem = mem.expand(num_z, -1)
+
+    if(self.use_copy):
+      _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb, mem_mask)
+      copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
+      copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
+
+      out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
+      x_logits = (out_prob + 1e-10).log()
+
+    temp_wordlp = torch.log_softmax(x_logits, dim=-1)
+    log_prob_w, indexes_w = torch.topk(temp_wordlp, 5)
+
+    probs = (state_logp + log_prob_w).exp().tolist()
+    ys = indexes_w.tolist()
+
+    return ys, probs
+
+  def init_bst(self, bs_init, beam_tree, fss, mem_emb, mem_mask, mem):
+    if bs_init["fs_idx"] == 0:
+        node = {'h': bs_init["h"], 'inp': bs_init["inp"], 'prevNode': None, 
+                'word_id': -1, "ys" : bs_init["prev_ys"] + [-1],
+                'state_id': -1, "zs" : bs_init["prev_zs"] + [-1],
+                'logp': bs_init["logp"], 'leng': bs_init["leng"] + 1, 
+                "fs_idx" : 0}
+        beam_tree.update_node(bs_init, node)
+        fss[0]["nodes"] = [(-node['logp'], node)]
+        return 
+
+    h = bs_init["h"]
+    inp = bs_init["inp"]
+
+    # decoder states
+    dec_out, decoder_hidden = self.p_decoder(inp, h, mem_emb, mem_mask)
+    dec_out = dec_out[0]
+
+    z_logits = self.p_z_proj(dec_out)
+
+    # shape: bsz X state_vocab
+    state_logp = torch.log_softmax(z_logits, dim=-1)
+
+    # get the chosen z
+    state_id = bs_init["z_id"]
+    log_ps = state_logp[0,state_id].item()
       
-    return out_dict, ibeam_data
-
-
-  def ibeam_act(self, ibeam_data, ibeam_key):
-    mem_i = ibeam_data["mem_i"]
-    mem_emb_i = ibeam_data["mem_emb_i"]
-    mem_mask_i = ibeam_data["mem_i"]
-    inp_i = ibeam_data["cache"][ibeam_key]["inp"]
-    state_i = ibeam_data["cache"][ibeam_key]["h"]
-    
-    prefix_z = ibeam_data["cache"][ibeam_key]["z"]
-    prefix_y = ibeam_data["cache"][ibeam_key]["y"]
-    prefix_score = ibeam_data["cache"][ibeam_key]["score"]
-    
-    sequences = self.beam_extend(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, 
-                                 init_state_id = prefix_z[-1], init_wordid = prefix_y[-1], 
-                                 init_score = prefix_score)
-
-    
-    z_list, y_list, score_list, cache, yz = self.extract_data(prefix_z, prefix_y, sequences)
-
-    ibeam_data["cache"].update(cache)
-    ibeam_data["yz"].update(yz)
-
-    out_dict = {"z_list" : z_list,
-                "y_list" : y_list,
-                "score_list" : score_list
-               }
+    z_emb = self.z_embeddings(torch.tensor([state_id]).to(self.device))
+    dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
+    x_logits = self.p_decoder.output_proj(dec_intermediate)
+    lm_prob = F.softmax(x_logits, dim=-1)
       
-    return out_dict, ibeam_data
+    if(self.use_copy):
+      _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb, mem_mask)
+      copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
+      copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
 
+      out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
+      x_logits = (out_prob + 1e-10).log()
 
-  def beam_extend(self, inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, init_state_id, init_wordid, init_score = 0):
-    sequences = []
+    temp_wordlp = torch.log_softmax(x_logits, dim=-1)  
 
-    for state_id in range(self.latent_vocab_size):
-      template = [state_id, -1]
-      endnodes = self.beam_search(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template, 
-                                  init_state_id, init_wordid, init_score)
+    word_id = bs_init["y_id"]
+    log_pw = temp_wordlp[0, word_id].item()
+    
+    inp = z_emb + self.embeddings(torch.tensor([word_id]).to(self.device))
+    node = {"h" : decoder_hidden, "inp" : inp, "prevNode" : None, 
+            "word_id" : word_id, "ys" : bs_init["prev_ys"] + [word_id],
+            "state_id" : state_id, "zs" : bs_init["prev_zs"] + [state_id],
+            "leng" : bs_init["leng"] + 1, 
+            "logp" : bs_init["logp"] + log_ps + log_pw,
+            "fs_idx" : bs_init["fs_idx"]}
 
-      score, n = sorted(endnodes, key=operator.itemgetter(0))[0]
+    beam_tree.update_node(bs_init, node)
+    
+    for fs_idx in bs_init["fs_idx"]:
+      fss[fs_idx]["nodes"] = [(-node['logp'], node)] 
 
-      sequence = {"score" : score}
+  def beam_search(self, bs_init, beam_tree):
+    mem_emb = beam_tree.mem_emb
+    mem_mask = beam_tree.mem_mask
+    mem = beam_tree.mem
+    template = beam_tree.template
 
-      z = [n["state_id"]]
-      y = [n["wordid"]]
-      inp = [n["inp"]]
-      state = [n["h"]]
-      scores = [-n["logp"]]
-
-      while n["prevNode"]["prevNode"] != None:
-        n = n["prevNode"]
-        z += [n["state_id"]]
-        y += [n["wordid"]]
-        inp += [n["inp"]]
-        state += [n["h"]]
-        scores += [-n["logp"]]
-
-      sequence["z"] = z[::-1]
-      sequence["y"] = y[::-1]
-      sequence["inp"] = inp[::-1]
-      sequence["h"] = state[::-1]
-      sequence["scores"] = scores[::-1]
-
-      sequences.append(sequence)
-
-    return sequences   
-
-
-  def extract_data(self, prefix_z, prefix_y, sequences):
-    y_list = []
-    z_list = []
-    score_list = []
-    yz = set()
-    cache = {}
-
-    for seq in sequences:
-      score = seq["score"]
-      score_list.append(score)
-        
-      z = prefix_z + seq["z"]
-      z_list.append(z)
-
-      y = prefix_y + seq["y"]
-      y_list.append(y)
-
-      yz.add((tuple(y), tuple(z), score))
-      
-      for i in range(len(seq["z"])):
-        cache_key = tuple(prefix_z + seq["z"][0:i+1])
-        cache[cache_key] = {"inp" : seq["inp"][i], 
-                            "h" : seq["h"][i],
-                            "z" : prefix_z + seq["z"][0:i+1],
-                            "y" : prefix_y + seq["y"][0:i+1],
-                            "score" : seq["scores"][i]
-                            }
-
-    return z_list, y_list, score_list, cache, yz   
-
-
-  def beam_search(self, inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template, init_state_id, init_wordid, init_score = 0):
     # beam vars
     beam_width = 2 # for y
     beam_w_ = 2 # for z
@@ -802,20 +777,17 @@ class LatentTemplateCRFAR(nn.Module):
     t = 0
     break_flag = False
     finished = False
-    
-    node = {'h': state_i, 'prevNode': None, 'wordid': init_wordid,
-                        'logp': -init_score, 'leng': 1, 
-                        'state_id': init_state_id, 'inp': inp_i, 
-                        "fstate_idx" : 0}
-    fss[0]["nodes"] = [(-node['logp'], node)]
+
+    bt = bs_init["bt"]
+    self.init_bst(bs_init, beam_tree, fss, mem_emb, mem_mask, mem)
     
     while not finished:
       if t>= max_len: break
       t += 1
           
-      for fstate_idx in range(num_fs):
+      for fs_idx in range(num_fs):
         # current state
-        fs = fss[fstate_idx]
+        fs = fss[fs_idx]
         # nodes coming from preceding fsm states
         prev_nodes = []
         prev_fstate_count = 0   
@@ -832,7 +804,7 @@ class LatentTemplateCRFAR(nn.Module):
         for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
           score_top, n_top = prev_nodes[elem]
           
-          if n_top["wordid"] == self.end_id and n_top["prevNode"] != None:
+          if n_top["word_id"] == self.end_id and n_top["prevNode"] != None:
             endnodes.append((score, n_top))
           
             if len(endnodes) >= number_required:
@@ -842,8 +814,11 @@ class LatentTemplateCRFAR(nn.Module):
           
           # decoder states
           dec_out, decoder_hidden = self.p_decoder(n_top['inp'].contiguous(), 
-            n_top['h'], mem_emb_i, mem_mask_i)
+            n_top['h'], mem_emb, mem_mask)
           dec_out = dec_out[0]
+
+          if bt:
+            beam_tree.update_hidden(n_top, decoder_hidden)
           
           z_logits = self.p_z_proj(dec_out)
           
@@ -871,13 +846,12 @@ class LatentTemplateCRFAR(nn.Module):
               
             z_emb = self.z_embeddings(torch.tensor([decoded_ts]).to(self.device))
             dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
-            
             x_logits = self.p_decoder.output_proj(dec_intermediate)
             lm_prob = F.softmax(x_logits, dim=-1)
               
             if(self.use_copy):
-              _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb_i, mem_mask_i)
-              copy_prob = tmu.batch_index_put(copy_dist, mem_i, self.vocab_size)
+              _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb, mem_mask)
+              copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
               copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
 
               out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
@@ -916,17 +890,21 @@ class LatentTemplateCRFAR(nn.Module):
             for new_k_w in range(len(temp_ww)):
               decoded_tw = temp_ww[new_k_w].view(-1)[0]
               log_pw = temp_pp[new_k_w].item()
+    
+              inp = z_emb + self.embeddings(torch.tensor([decoded_tw]).to(self.device))
               
-              inp_i = z_emb + self.embeddings(torch.tensor([decoded_tw]).to(self.device))
-              
-              node = {'h': decoder_hidden, 'prevNode': n_top, 'wordid': decoded_tw.item(),
-                      'logp': n_top['logp'] + log_ps + log_pw, 'leng': n_top['leng'] + 1,
-                      'state_id': decoded_ts.item(),  'inp': inp_i,
-                       "fstate_idx" : fstate_idx}
-            
+              word_id = decoded_tw.item()
+              state_id = decoded_ts.item()
+              node = {'h': decoder_hidden, 'inp': inp, 'prevNode': n_top, 
+                      'word_id': word_id, 'ys' : n_top["ys"] + [word_id],
+                      'state_id': state_id, 'zs' : n_top["zs"] + [state_id],
+                      'logp': n_top['logp'] + log_ps + log_pw, 
+                      'leng': n_top['leng'] + 1, "fs_idx" : fs_idx}
+              beam_tree.update_node(bs_init, node)
+
               score = -node['logp']
               
-              if node['wordid'] == self.end_id and node['prevNode'] != None:
+              if node['word_id'] == self.end_id and node['prevNode'] != None:
                 endnodes.append((score, node))
                 continue
               if node["leng"] >= max_len and fs["exit"]:
@@ -941,18 +919,37 @@ class LatentTemplateCRFAR(nn.Module):
           next_nodes.append((score, nn_))
 
         next_nodes = sorted(next_nodes, key=lambda x: x[0])
-        
-        # not sure what this condition does
-#         if next_nodes != [] and fstate_idx == len(fstates) - 1 and next_nodes[0][1]["wordid"] == self.end_id:
-#           finished = True
 
-        fss[fstate_idx]["next_nodes"] = next_nodes
+        fss[fs_idx]["next_nodes"] = next_nodes
           
-      for fstate_idx in range(num_fs):
-        fss[fstate_idx]["nodes"] = fss[fstate_idx]["next_nodes"]
+      for fs_idx in range(num_fs):
+        fss[fs_idx]["nodes"] = fss[fs_idx]["next_nodes"]
         
     return endnodes
 
+  def endnodes_to_utterances(self, endnodes):
+    utterances_w = []
+    utterances_s = []
+    scores_result = []
+  
+    for score, n in sorted(endnodes, key=operator.itemgetter(0)):
+      utterance_w = []
+      utterance_s = []
+      utterance_w.append(n['word_id'])
+      utterance_s.append(n['state_id'])
+      # back trace
+      while n['prevNode'] != None:
+        n = n['prevNode']
+        utterance_w.append(n['word_id'])
+        utterance_s.append(n['state_id'])
+
+      utterance_w = utterance_w[::-1]
+      utterance_s = utterance_s[::-1]
+      utterances_w.append(utterance_w)
+      utterances_s.append(utterance_s)
+      scores_result.append(score)
+
+    return utterances_w, utterances_s, scores_result
 
   def prepare_dec_io(self, 
     z_sample_ids, z_sample_emb, sentences, x_lambd):

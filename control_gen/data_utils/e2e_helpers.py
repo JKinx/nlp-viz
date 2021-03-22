@@ -39,16 +39,3 @@ def e2e_dict_to_kvs(entry):
             kvs.append((k, v))
 
     return kvs
-
-
-def e2e_decode_out(dataset, ys, zs):
-    batch_size = len(ys)
-    sents = []
-    states = []
-
-    for idx in range(batch_size):
-        sent = [dataset.id2word[el] for el in ys[idx]]
-        sents.append(sent)
-        states.append(zs[idx])
-
-    return sents, states
