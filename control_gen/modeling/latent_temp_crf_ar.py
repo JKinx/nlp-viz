@@ -756,7 +756,6 @@ class LatentTemplateCRFAR(nn.Module):
             "logp" : bs_init["logp"] + log_ps + log_pw,
             "fs_idx" : bs_init["fs_idx"]}
     
-    print(bs_init["fs_idx"])
     for fs_idx in bs_init["fs_idx"]:
       node["fs_idx"] = fs_idx[0]
       node["bids"] = list(fs_idx[1])

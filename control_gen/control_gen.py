@@ -56,8 +56,8 @@ class ControlGen:
             out = {"y" : pred_y[i], 
                    "z" : pred_z[i], 
                    "score" : out_dict["pred_score"][i],
-                   "beam_tree" : out_dict["beam_trees"][i],
-                   "bt" : pred_bt[i],
+                   "bt_object" : out_dict["beam_trees"][i],
+                   "bt_graph" : pred_bt[i],
                    "y_raw" : out_dict["pred_y"][i],
                    "z_raw" : out_dict["pred_z"][i],
                    "regex_alignment" : out_dict["regex_alignment"][i]
@@ -160,8 +160,10 @@ class ControlGen:
                           "score" : probe_out[1][i][j]}
                 option["y"] = self.dataset.id2word[option["y_raw"]]
                 options.append(option)
+                
+        out_dict = {"decoded" : options, "scores" : probe_out[1], "indices" : probe_out[0]}
         
-        return options
+        return out_dict
     
     def bt_act(self, bt, key, y, z):
         bs_init = bt.get_bs_init(key, z, y)
@@ -176,10 +178,10 @@ class ControlGen:
         out = {"y" : pred_y[0], 
                "z" : pred_z[0], 
                "score" : out_dict["pred_score"],
-               "bt" : pred_bt[0],
+               "bt_graph" : pred_bt[0],
                "y_raw" : out_dict["pred_y"],
                "z_raw" : out_dict["pred_z"],
-               "beam_tree" : bt,
+               "bt_object" : bt,
                "regex_alignment" : out_dict["regex_alignment"]}
         
         return out
