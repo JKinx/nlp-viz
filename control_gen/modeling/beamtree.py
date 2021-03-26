@@ -19,7 +19,7 @@ class BeamTree():
 
         self.bts = defaultdict(list)
 
-    def init_bs_init(self):
+    def init_bs_init(self, return_bt = False):
         bs_init = {"h" : self.h[self.init_key],
                    "inp" : self.inp[(-2,-2)],
                    "logp" : self.logp[self.init_key],
@@ -28,12 +28,12 @@ class BeamTree():
                    "fs_idx" : (0,[-2, -1]),
                    "leng" : -1,
                    "key" : self.get_key([-2,-1], [-2,-1]),
-                   "bt" :  True
+                   "bt" :  return_bt
                    }
         return bs_init
 
-    def get_bs_init(self, key, z, y):
-        bs_init = {"bt" :  True}
+    def get_bs_init(self, key, z, y, return_bt = False):
+        bs_init = {"bt" :  return_bt}
         zs, ys = self.reverse_key(key)
 
         h_key = self.get_key(zs[:-2], ys[:-2])

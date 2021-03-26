@@ -25,7 +25,7 @@ class ControlGen:
         
         del loaded
 
-    def get_yz_batched(self, x_list, template_list=None):
+    def get_yz_batched(self, x_list, template_list=None, return_bt = False):
         batch_size = len(x_list)
 
         if template_list is None:
@@ -44,7 +44,7 @@ class ControlGen:
         keys = torch.from_numpy(x_batch['keys']).to(self.config.device).long()
         vals = torch.from_numpy(x_batch['vals']).to(self.config.device).long()
 
-        out_dict = self.model.model.infer2(keys, vals, template_list)
+        out_dict = self.model.model.infer2(keys, vals, template_list, return_bt)
         
         pred_y, pred_z = decode_yz(self.dataset, 
                                   out_dict["pred_y"],
@@ -66,12 +66,12 @@ class ControlGen:
 
         return out_list
     
-    def get_yz(self, x, template=None):
+    def get_yz(self, x, template=None, return_bt = False):
         if template is None:
             template_list = None
         else:
             template_list = [template + "."]
-        return self.get_yz_batched([x], template_list)[0]
+        return self.get_yz_batched([x], template_list, return_bt)[0]
     
     def get_z_batched(self, x_list, y_list):
         batch_size = len(x_list)
@@ -166,7 +166,7 @@ class ControlGen:
         return out_dict
     
     def bt_act(self, bt, key, y, z):
-        bs_init = bt.get_bs_init(key, z, y)
+        bs_init = bt.get_bs_init(key, z, y, return_bt = True)
         
         out_dict = self.model.model.beam_tree_act(bs_init, bt)
         

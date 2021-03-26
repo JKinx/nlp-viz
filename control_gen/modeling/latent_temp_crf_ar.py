@@ -543,7 +543,7 @@ class LatentTemplateCRFAR(nn.Module):
     
     return self.z_crf.marginals(z_emission_scores, sent_lens)
   
-  def infer2(self, keys, vals, templates):
+  def infer2(self, keys, vals, templates, return_bt =  False):
     """Latent template inference step
 
     Args:
@@ -566,7 +566,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     # decoding 
     pred_y, pred_z, pred_score, beam_trees, bts, bid = self.decode_infer2(vals, kv_emb,
-      kv_enc, kv_mask, templates)
+      kv_enc, kv_mask, templates, return_bt)
     out_dict['pred_y'] = pred_y
     out_dict['pred_z'] = pred_z
     out_dict['pred_score'] = pred_score
@@ -575,7 +575,7 @@ class LatentTemplateCRFAR(nn.Module):
     out_dict["regex_alignment"] = bid
     return out_dict
 
-  def decode_infer2(self, mem, mem_emb, mem_enc, mem_mask, templates):    
+  def decode_infer2(self, mem, mem_emb, mem_enc, mem_mask, templates, return_bt):    
     batch_size = mem.size(0)
     
     decoded_batch = []
@@ -605,7 +605,7 @@ class LatentTemplateCRFAR(nn.Module):
       template = templates[idx]
 
       beam_tree = BeamTree(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template)
-      bs_init = beam_tree.init_bs_init()
+      bs_init = beam_tree.init_bs_init(return_bt)
     
       endnodes = self.beam_search(bs_init, beam_tree)
 
@@ -710,7 +710,8 @@ class LatentTemplateCRFAR(nn.Module):
                 'state_id': -1, "zs" : bs_init["prev_zs"] + [-1],
                 'logp': bs_init["logp"], 'leng': bs_init["leng"] + 1, 
                 "fs_idx" : 0, "bids" : list(bs_init["fs_idx"][1])}
-        beam_tree.update_node(bs_init, node)
+        if bs_init["bt"]:
+          beam_tree.update_node(bs_init, node)
         fss[0]["nodes"] = [(-node['logp'], node)]
         return 
 
@@ -759,7 +760,8 @@ class LatentTemplateCRFAR(nn.Module):
     for fs_idx in bs_init["fs_idx"]:
       node["fs_idx"] = fs_idx[0]
       node["bids"] = list(fs_idx[1])
-      beam_tree.update_node(bs_init, node)
+      if bs_init["bt"]:
+        beam_tree.update_node(bs_init, node)
       fss[fs_idx[0]]["nodes"] = [(-node['logp'], node)] 
 
   def beam_search(self, bs_init, beam_tree):
@@ -910,7 +912,8 @@ class LatentTemplateCRFAR(nn.Module):
                       'logp': n_top['logp'] + log_ps + log_pw, 
                       'leng': n_top['leng'] + 1, "fs_idx" : fs_idx,
                       "bids" : n_top["bids"] + [fs["bid"]]}
-              beam_tree.update_node(bs_init, node)
+              if bt:
+                beam_tree.update_node(bs_init, node)
 
               score = -node['logp']
               
