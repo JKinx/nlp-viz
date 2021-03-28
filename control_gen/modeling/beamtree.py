@@ -70,8 +70,8 @@ class BeamTree():
         return inp, h, self.mem_emb, self.mem_mask, self.mem 
 
     def get_bt(self, bs_init):
-        pre_z = bs_init["prev_zs"]
-        pre_y = bs_init["prev_ys"]
+        pre_z = bs_init["prev_zs"] + [bs_init["z_id"]]
+        pre_y = bs_init["prev_ys"] + [bs_init["y_id"]]
 
         pre_tree = []
         for i in range(2, len(pre_y)):
