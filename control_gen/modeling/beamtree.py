@@ -25,6 +25,8 @@ class BeamTree():
                    "logp" : self.logp[self.init_key],
                    "prev_zs" : [-2],
                    "prev_ys" : [-2],
+                   "z_id" : -1,
+                   "y_id" : -1,
                    "fs_idx" : (0,[-2, -1]),
                    "leng" : -1,
                    "key" : self.get_key([-2,-1], [-2,-1]),
