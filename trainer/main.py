@@ -246,10 +246,22 @@ def set_argument(config, args):
   config.output_path = output_path + '/'
   config.tensorboard_path = tensorboard_path + '/'
   
+#   config.data_path = {
+#     'train': config.data_root + config.dataset + '/trainset.csv', 
+#     'dev': config.data_root + config.dataset + '/devset.csv', 
+#     'test': config.data_root + config.dataset + '/testset_w_refs.csv',
+#     }
+  
+#   config.data_path = {
+#     'train': config.data_root + config.dataset + '/trainset.pkl', 
+#     'dev': config.data_root + config.dataset + '/devset.pkl', 
+#     'test': config.data_root + config.dataset + '/testset.pkl',
+#     }
+ 
   config.data_path = {
-    'train': config.data_root + config.dataset + '/trainset.csv', 
-    'dev': config.data_root + config.dataset + '/devset.csv', 
-    'test': config.data_root + config.dataset + '/testset_w_refs.csv',
+    'train': config.data_root + config.dataset + '/trainset_notable.pkl', 
+    'dev': config.data_root + config.dataset + '/devset_notable.pkl', 
+    'test': config.data_root + config.dataset + '/testset_notable.pkl',
     }
   
   config.write_arguments()
@@ -280,7 +292,7 @@ def main():
 
   # model 
   model = LatentTemplateCRFARModel(config) 
-  tmu.print_params(model)
+#   tmu.print_params(model)
 
   # controller
   controller = Controller(config, model, dataset)

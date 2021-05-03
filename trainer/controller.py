@@ -131,8 +131,7 @@ class Controller(object):
         save_path = self.model_path + 'last'
     print('Saving the model at: %s' % save_path)
     torch.save(
-      {'model_state_dict': model.state_dict(), 
-        'optimizer_state_dict': model.optimizer.state_dict(), 
+      {'model_state_dict': model.state_dict(),
         'epoch': ei, "config": self.config, "dataset":self._dataset},
       save_path)
     return 
@@ -220,7 +219,7 @@ class Controller(object):
               (time() - epoch_start_time) / (bi + 1)))
           # print the average metrics starting from current epoch 
           self.logger.print()
-          tmu.print_grad(model) 
+#           tmu.print_grad(model) 
 
         if(bi % (self.print_interval // 5) == 0):
           print('.', end=' ', flush=True)

@@ -7,20 +7,21 @@ from torch.nn.utils.clip_grad import clip_grad_norm_
 
 from .latent_temp_crf_ar import LatentTemplateCRFAR
 from .ftmodel import FTModel
+from transformers import AdamW
 
 class LatentTemplateCRFARModel(FTModel):
   def __init__(self, config):
     super().__init__()
 
     self.model = LatentTemplateCRFAR(config)
-    self.seperate_optimizer = config.seperate_optimizer
-    if(self.seperate_optimizer):
-      self.enc_optimizer = SGD(
-        self.model.inf_parameters(), lr=config.enc_learning_rate)
-      self.dec_optimizer = Adam(
-        self.model.dec_parameters(), lr=config.dec_learning_rate)
-    else:
-      self.optimizer = Adam(self.model.parameters(), lr=config.learning_rate)
+    
+    q_encoder_params = [el[1] for el in self.model.named_parameters() \
+                       if "q_encoder" in el[0]]
+    other_params = [el[1] for el in self.model.named_parameters() \
+                       if "q_encoder" not in el[0]]
+    
+    self.q_optimizer = AdamW(q_encoder_params, lr=5e-5)
+    self.other_optimizer = Adam(other_params, lr=config.learning_rate)
 
     self.dataset = config.dataset
 
@@ -33,9 +34,7 @@ class LatentTemplateCRFARModel(FTModel):
 
   def train_step(self, batch, n_iter, ei, bi, schedule_params):
     model = self.model
-    sentences = torch.from_numpy(batch['sent_dlex']).to(self.device)
-    
-    sent_full = torch.from_numpy(batch['sentences']).to(self.device)
+    sentences = torch.from_numpy(batch['sentences']).to(self.device)
 
     model.zero_grad()
     loss, out_dict = model(
@@ -43,16 +42,19 @@ class LatentTemplateCRFARModel(FTModel):
       vals=torch.from_numpy(batch['vals']).to(self.device),
       sentences=sentences,
       sent_lens=torch.from_numpy(batch['sent_lens']).to(self.device),
-      sent_full = sent_full,
       tau=schedule_params['tau'], 
       x_lambd=schedule_params['x_lambd'],
       return_grad=False,
-      zcs=torch.from_numpy(batch['zcs']).to(self.device)
+      zcs=torch.from_numpy(batch['zcs']).to(self.device),
+      t_input_ids = torch.from_numpy(batch['t_input_ids']).to(self.device),
+      t_attn_mask = torch.from_numpy(batch['t_attn_mask']).to(self.device),
+      t_token_type_ids = torch.from_numpy(batch['t_token_type_ids']).to(self.device)
       )
 
     loss.backward()
     clip_grad_norm_(model.parameters(), self.max_grad_norm)
-    self.optimizer.step()
+    self.q_optimizer.step()
+    self.other_optimizer.step()
 
     out_dict['tau'] = schedule_params['tau']
     out_dict['x_lambd'] = schedule_params['x_lambd']
