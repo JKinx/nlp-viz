@@ -211,7 +211,10 @@ def main():
   # dataset
   dataset = Dataset(config)
   dataset.build()
-  config.key_vocab_size = dataset.key_vocab_size
+    
+#   import pickle
+#   pickle.dump(dataset, open("../dynamic_data.pkl", "wb"))
+    
   config.vocab_size = dataset.vocab_size
     
   # debug

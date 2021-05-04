@@ -33,11 +33,13 @@ class LatentTemplateCRFARModel(FTModel):
 
   def train_step(self, batch, n_iter, ei, bi, schedule_params):
     model = self.model
-    sentences = torch.from_numpy(batch['sentences']).to(self.device)
 
     data_dict = {}
     for key in batch:
-      data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
+      try:
+        data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
+      except:
+        data_dict[key] = batch[key]
 
     model.zero_grad()
     loss, out_dict = model(
@@ -58,9 +60,14 @@ class LatentTemplateCRFARModel(FTModel):
   def valid_step(self, template_manager, batch, n_iter, ei, bi, 
     mode='dev', dataset=None, schedule_params=None):
     """Single batch validation"""
+    model = self.model
+    
     data_dict = {}
     for key in batch:
-      data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
+      try:
+        data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
+      except:
+        data_dict[key] = batch[key]
 
     with torch.no_grad():
       out_dict = model.infer(data_dict)

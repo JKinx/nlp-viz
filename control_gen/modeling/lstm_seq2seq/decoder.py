@@ -10,7 +10,7 @@ from torch.distributions import Categorical
 
 from .. import torch_model_utils as tmu 
 
-def attention(query, memory, mem_mask, device):
+def attention(query, memory, mem_mask, device, no_softmax=False):
   """The attention function, Transformer style, scaled dot product
   
   Args:
@@ -38,11 +38,13 @@ def attention(query, memory, mem_mask, device):
     attn_weights = attn_weights.masked_fill(mem_mask == 0, -1e9)
   
   attn_dist = F.softmax(attn_weights, -1)
-  # print(attn_dist.shape)
   attn_dist = attn_dist.unsqueeze(2)
 
   context_vec = attn_dist * memory
   context_vec = context_vec.sum(1) # [B, S]
+
+  if no_softmax:
+    return context_vec, attn_weights
   return context_vec, attn_dist.squeeze(2)
 
 class Attention(nn.Module):
@@ -54,7 +56,7 @@ class Attention(nn.Module):
     self.attn_proj = nn.Linear(m_state_size, embedding_size)
     return 
 
-  def forward(self, query, memory, mem_mask=None):
+  def forward(self, query, memory, mem_mask=None, no_softmax=False):
     """
     Args:
       query: size=[batch, state_size]
@@ -69,7 +71,7 @@ class Attention(nn.Module):
     # print(query.shape)
     device = query.device
     query = self.query_proj(query)
-    context_vec, attn_dist = attention(query, memory, mem_mask, device)
+    context_vec, attn_dist = attention(query, memory, mem_mask, device, no_softmax)
     context_vec = self.attn_proj(context_vec)
     return context_vec, attn_dist
 

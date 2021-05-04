@@ -67,13 +67,14 @@ class LinearChainCRF(nn.Module):
       alpha: size=[batch, max_len, label_size]
       Z: size=[batch]
     """
+    label_size = emission_scores.size(2)
     device = emission_scores.device
     all_scores = self.calculate_all_scores(emission_scores,
                                           transition_scores)
 
     batch_size = all_scores.size(0)
     seq_len = all_scores.size(1)
-    alpha = torch.zeros(batch_size, seq_len, self.label_size).to(device)
+    alpha = torch.zeros(batch_size, seq_len, label_size).to(device)
 
     # the first position of all labels = 
     # (the transition from start - > all labels) + current emission.
@@ -82,25 +83,26 @@ class LinearChainCRF(nn.Module):
     for word_idx in range(1, seq_len):
       # batch_size, label_size, label_size
       before_log_sum_exp = alpha[:, word_idx - 1, :]\
-        .view(batch_size, self.label_size, 1)\
-        .expand(batch_size, self.label_size, self.label_size)\
+        .view(batch_size, label_size, 1)\
+        .expand(batch_size, label_size, label_size)\
         + all_scores[:, word_idx, :, :]
       alpha[:, word_idx, :] = torch.logsumexp(before_log_sum_exp, 1)
 
     # batch_size x label_size
     last_alpha = torch.gather(alpha, 1, seq_lens.view(batch_size, 1, 1)\
-      .expand(batch_size, 1, self.label_size) - 1)\
-        .view(batch_size, self.label_size)
+      .expand(batch_size, 1, label_size) - 1)\
+        .view(batch_size, label_size)
 
     # assuming transition to end has potential 1   
     # last_alpha.shape=batch_size
     last_alpha = torch.logsumexp(
-      last_alpha.view(batch_size, self.label_size, 1), 1).view(batch_size)
+      last_alpha.view(batch_size, label_size, 1), 1).view(batch_size)
     log_Z = last_alpha
     return alpha, log_Z
 
   def backward_score(self, emission_scores, transition_scores, seq_lens):
     """backward algorithm"""
+    label_size = emission_scores.size(2)
     device = emission_scores.device
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
 
@@ -108,7 +110,7 @@ class LinearChainCRF(nn.Module):
     seq_len = all_scores.size(1)
 
     # beta[T] initialized as 0
-    beta = torch.zeros(batch_size, seq_len, self.label_size).to(device)
+    beta = torch.zeros(batch_size, seq_len, label_size).to(device)
 
     # beta stored in reverse order
     # all score at i: phi(from class at L - i - 1, to class at L - i)
@@ -117,8 +119,8 @@ class LinearChainCRF(nn.Module):
       # beta[t + 1]: batch_size, t + 1, to label_size
       # indexing tricky here !! and different than the forward algo
       beta_t_ = beta[:, word_idx - 1, :]\
-        .view(batch_size, 1, self.label_size)\
-        .expand(batch_size, self.label_size, self.label_size)\
+        .view(batch_size, 1, label_size)\
+        .expand(batch_size, label_size, label_size)\
 
       # all_scores[t]: batch, from_state t-1, to state t
       before_log_sum_exp = beta_t_ + all_scores[:, word_idx - 1, :, :]
@@ -149,7 +151,7 @@ class LinearChainCRF(nn.Module):
       relaxed_sample: size=[batch, max_len, num_class]
     """
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
-    alpha, log_Z = self.forward_score(emission_scores, seq_lens)
+    alpha, log_Z = self.forward_score(emission_scores, transition_scores, seq_lens)
 
     batch_size = emission_scores.size(0)
     max_len = emission_scores.size(1)
@@ -231,7 +233,7 @@ class LinearChainCRF(nn.Module):
     """
 
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
-    alpha, log_Z = self.forward_score(emission_scores, seq_lens)
+    alpha, log_Z = self.forward_score(emission_scores, transition_scores, seq_lens)
 
     batch_size = emission_scores.size(0)
     max_len = emission_scores.size(1)
@@ -261,6 +263,16 @@ class LinearChainCRF(nn.Module):
     H_total = p_T * (H_last - log_p_T)
     H_total = H_total.sum(dim = -1)
     return H_total
+
+#   def rsample(self, emission_scores, transition_scores, seq_lens, tau):
+#     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
+#     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
+#     return dist.gumbel_crf(tau).sum(-1)
+
+#   def entropy(self, emission_scores, transition_scores, seq_lens):
+#     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
+#     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
+#     return dist.entropy
   
   def marginals(self, emission_scores, transition_scores, seq_lens):
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)

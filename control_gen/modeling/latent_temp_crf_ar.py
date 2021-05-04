@@ -21,6 +21,8 @@ from .fst import make_fst
 from .beamtree import BeamTree
 from transformers import TapasModel
 
+# torch.autograd.set_detect_anomaly(True)
+
 class LatentTemplateCRFAR(nn.Module):
   """The latent template CRF autoregressive version, table to text setting"""
 
@@ -80,6 +82,10 @@ class LatentTemplateCRFAR(nn.Module):
     self.pr = config.pr
     self.pr_inc_lambd = config.pr_inc_lambd
     self.pr_exc_lambd = config.pr_exc_lambd
+    
+    # crf_attn
+    self.crf_y_header = nn.Linear(config.tapas_state_size, config.tapas_state_size)
+    self.crf_header_self = nn.Linear(config.tapas_state_size, config.tapas_state_size)
     return 
 
   def init_state(self, s):
@@ -118,17 +124,33 @@ class LatentTemplateCRFAR(nn.Module):
 
   def get_crf_scores(self, input_ids, attention_mask, token_type_ids, 
     y_header_mask, header_self_mask):
-    outputs = self.tapas(input_ids, attention_mask, token_type_ids,
-                         output_attentions = True)
-    outputs = outputs.attentions[-1][:,0]
+    outputs = self.tapas(input_ids, attention_mask, token_type_ids).last_hidden_state    
+    
+    y_header = torch.bmm(
+        self.crf_y_header(outputs[:,:self.max_y_len+1]),
+        outputs[:,self.max_y_len+2:].transpose(1,2)
+    )
+    y_header = y_header.masked_fill(y_header_mask == 0, -1e9)
+    
+    header_self = torch.bmm(
+        self.crf_header_self(outputs[:,self.max_y_len+2:]),
+        outputs[:,self.max_y_len+2:].transpose(1,2)
+    )
+    header_self = header_self.masked_fill(header_self_mask == 0, -1e9)
+    
+    return header_self, y_header
+    
+#     outputs = self.tapas(input_ids, attention_mask, token_type_ids,
+#                          output_attentions = True)
+#     outputs = outputs.attentions[-1][:,0]
 
-    y_header_attention = outputs[:,:self.max_y_len+1,self.max_y_len+2:]
-    y_header_attention[~y_header_mask] = float('-inf')
+#     y_header_attention = outputs[:,:self.max_y_len+1,self.max_y_len+2:].log()
+#     y_header_attention = y_header_attention.masked_fill(y_header_mask == 0, -1e9)
 
-    header_self_attention = outputs[:,self.max_y_len+2:,self.max_y_len+2:]
-    header_self_attention[~header_self_mask] = float('-inf')
+#     header_self_attention = outputs[:,self.max_y_len+2:,self.max_y_len+2:].log()
+# #     header_self_attention = header_self_attention.masked_fill(header_self_mask == 0, -1e9)
 
-    return header_self_attention, y_header_attention
+#     return header_self_attention, y_header_attention
     
   def forward(self, data_dict, tau, x_lambd):
     out_dict = {}
@@ -156,6 +178,7 @@ class LatentTemplateCRFAR(nn.Module):
         
     # PR
     if self.pr:
+      zcs = data_dict["zcs"]
       max_z = data_dict["max_z_lst"]
       pr_inc_loss, pr_exc_loss = self.compute_pr(z_emission_scores,
         z_transition_scores, zcs[:, :max_len], sent_mask, sent_lens,
@@ -173,19 +196,18 @@ class LatentTemplateCRFAR(nn.Module):
     loss += self.z_beta * ent_z
     out_dict['ent_z'] = tmu.to_np(ent_z)
     out_dict['ent_z_loss'] = self.z_beta * tmu.to_np(ent_z)
-
+    
     z_sample_ids, z_sample, _ = self.z_crf.rsample(
         z_emission_scores, z_transition_scores, sent_lens, tau,
         return_switching=True)
 
-    z_sample_max, _ = z_sample.max(dim=-1)
-    z_sample_max = z_sample_max.masked_fill(~sent_mask, 0)
+#     z_sample = self.z_crf.rsample(z_emission_scores, z_transition_scores, sent_lens, tau)
+#     z_sample_ids = z_sample.argmax(-1)
 
     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
     z_sample_ids.masked_fill_(~sent_mask, 0) 
     z_sample_ids_out = z_sample_ids.masked_fill(~sent_mask, -1)
     out_dict['z_sample_ids'] = tmu.to_np(z_sample_ids_out)
-    inspect['z_sample_ids'] = tmu.to_np(z_sample_ids_out)
 
     # encode table
     encoded_x = self.encode_x(
@@ -215,7 +237,6 @@ class LatentTemplateCRFAR(nn.Module):
     loss = -loss 
 
     out_dict['loss'] = tmu.to_np(loss)
-    out_dict['inspect'] = inspect
     return loss, out_dict
 
   def compute_pr(self, emission_scores, transition_scores, zcs, sent_mask, 
@@ -265,8 +286,8 @@ class LatentTemplateCRFAR(nn.Module):
     max_len = dec_inputs.size(1)
 
     # average of table encoding
-    mem_enc = encoded_xs * x_mask.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / x_mask.sum(dim=1, keepdim=True)
+    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
 
     state = self.init_state(mem_enc)
     
@@ -284,9 +305,10 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      z_logits, _ = self.z_logits_attention(dec_out, encoded_xs, header_masks)
-      z_logits = z_logits.log()
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
+      z_logits = (z_logits + 1e-10).log()
       z_pred.append(z_logits.argmax(dim=-1))
+        
       log_prob_z_i = -F.cross_entropy(
         z_logits, dec_targets_z[i], reduction='none')
       log_prob_z.append(log_prob_z_i)
@@ -335,11 +357,7 @@ class LatentTemplateCRFAR(nn.Module):
 
   def infer(self, data_dict):
     out_dict = {}
-    batch_size = keys.size(0)
-    mem_len = keys.size(1)
-    state_size = self.state_size
-    device = keys.device
-
+    
     encoded_x = self.encode_x(
       data_dict["x_input_id_lst"],
       data_dict["x_attn_mask_lst"],
@@ -369,8 +387,8 @@ class LatentTemplateCRFAR(nn.Module):
       torch.zeros(batch_size).to(device).long() + self.start_id)
     
     # average of table encoding
-    mem_enc = encoded_xs * x_mask.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / x_mask.sum(dim=1, keepdim=True)
+    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
     state = self.init_state(mem_enc)
 
     for i in range(self.max_y_len+1): 
@@ -378,13 +396,14 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      z_logits, _ = self.z_logits_attention(dec_out, encoded_xs, header_masks)
-      z_logits = z_logits.log()
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
+      z_logits = (z_logits + 1e-10).log()
 
       z = z_logits.argmax(-1)
 
       # predict x based on z 
-      z_emb = self.embed_z(z, encoded_xs)
+      z_emb = self.embed_z(z.unsqueeze(-1), encoded_xs)
+      z_emb = z_emb.squeeze(1)
 
       dec_intermediate = self.p_z_intermediate(
         torch.cat([dec_out, z_emb], dim=1))

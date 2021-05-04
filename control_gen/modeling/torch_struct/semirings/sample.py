@@ -118,7 +118,8 @@ def GumbelCRFSemiring(temp):
             grad_input = None
             if ctx.needs_input_grad[0]:
                 def sample(ls):
-                    update = (ls + torch.distributions.Gumbel(0, 1).sample((ls.shape[-1],))) / temp
+                    s = torch.distributions.Gumbel(0,1).sample((ls.shape[-1],))
+                    update = (ls + s.to(ls.device)) / temp
                     out = ST.apply(update, ls.shape[-1])
                     return out 
 

@@ -52,7 +52,7 @@ class Config:
     # logging info during training 
     self.log_info = [
         'loss', 
-        'tau', 'x_lambd', 'z_sample_max',
+        'tau', 'x_lambd', 
         'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
         'ent_z', 'ent_z_loss', 'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
         ]
