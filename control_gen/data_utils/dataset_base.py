@@ -8,9 +8,6 @@ class DatasetBase(object):
   @property
   def vocab_size(self): return len(self.word2id)
 
-  @property
-  def key_vocab_size(self): return len(self.key2id)
-
   def dataset_size(self, setname):
     raise NotImplementedError
     return 

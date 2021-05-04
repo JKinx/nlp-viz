@@ -26,57 +26,50 @@ class LinearChainCRF(nn.Module):
 
   def __init__(self, config):
     super(LinearChainCRF, self).__init__()
-    self.label_size = config.latent_vocab_size
-
-    # TEST
-    # init_transition = torch.Tensor([[1, 3], 
-    #                                 [2, 4]]).log()
-
-    init_transition = torch.randn(
-      self.label_size, self.label_size).to(config.device)
-
-    # do not use any start or end index, assume that all links to start and end
-    # has potential 1 
-    self.transition = nn.Parameter(init_transition)
     return 
 
-  def calculate_all_scores(self, emission_scores):
+  def calculate_all_scores(self, emission_scores, transition_scores):
     """Mix the transition and emission scores
 
     Args:
       emission_scores: type=torch.Tensor(float), 
         size=[batch, max_len, num_class]
+      transition_scores: type=torch.Tensor(float), 
+        size=[batch, num_class, num_class]
 
     Returns:
       scores: size=[batch, len, num_class, num_class]
       scores = log phi(batch, x_t, y_{t-1}, y_t)
     """
-    label_size = self.label_size
+    label_size = emission_scores.size(2)
     batch_size = emission_scores.size(0)
     seq_len = emission_scores.size(1)
 
     # scores[batch, t, C, C] = log_potential(t, from y_{t-1}, to y_t)
-    scores = self.transition.view(1, 1, label_size, label_size)\
+    scores = transition_scores.view(batch_size, 1, label_size, label_size)\
       .expand(batch_size, seq_len, label_size, label_size) + \
       emission_scores.view(batch_size, seq_len, 1, label_size)\
       .expand(batch_size, seq_len, label_size, label_size)
 
     return scores
 
-  def forward_score(self, emission_scores, seq_lens):
+  def forward_score(self, emission_scores, transition_scores, seq_lens):
     """The forward algorithm
     
     score = log(potential)
 
     Args:
       emission_scores: size=[batch, max_len, label_size]
+      transition_scores: type=torch.Tensor(float), 
+        size=[batch, num_class, num_class]
 
     Returns:
       alpha: size=[batch, max_len, label_size]
       Z: size=[batch]
     """
     device = emission_scores.device
-    all_scores = self.calculate_all_scores(emission_scores)
+    all_scores = self.calculate_all_scores(emission_scores,
+                                          transition_scores)
 
     batch_size = all_scores.size(0)
     seq_len = all_scores.size(1)
@@ -106,10 +99,10 @@ class LinearChainCRF(nn.Module):
     log_Z = last_alpha
     return alpha, log_Z
 
-  def backward_score(self, emission_scores, seq_lens):
+  def backward_score(self, emission_scores, transition_scores, seq_lens):
     """backward algorithm"""
     device = emission_scores.device
-    all_scores = self.calculate_all_scores(emission_scores)
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
 
     batch_size = all_scores.size(0)
     seq_len = all_scores.size(1)
@@ -137,147 +130,7 @@ class LinearChainCRF(nn.Module):
     # beta[:, 0] = emission_scores[:, 0]
     return beta
 
-  def log_prob(self, seq, emission_scores, seq_lens):
-    """Evaluate the probability of a sequence
-    
-    Args:
-      seq: [batch, max_len]
-      emission_scores: [batch, max_len, num_class]
-      seq_lens: [batch]
-    """
-    device = emission_scores.device
-    max_len = seq.size(1)
-    batch_size = seq.size(0)
-    alpha, log_Z = self.forward_score(emission_scores, seq_lens)
-    score = torch.zeros(batch_size, max_len).to(device)
-    
-    for i in range(max_len):
-      if(i == 0):
-        score[:, i] += tmu.batch_index_select(
-          emission_scores[:, 0], # [batch, num_class]
-          seq[:, 0]) # [batch]
-      else: 
-        transition_ = self.transition.view(1, self.label_size, self.label_size)
-        transition_ = transition_.repeat(batch_size, 1, 1)
-        prev_ind = seq[:, i - 1] # [batch] 
-        current_ind = seq[:, i] # [batch]
-        # select prev index
-        transition_ = tmu.batch_index_select(transition_, prev_ind)
-        # select current index
-        transition_ = tmu.batch_index_select(transition_, current_ind)
-        score[:, i] += transition_
-        score[:, i] += tmu.batch_index_select(emission_scores[:, i], current_ind)
-
-    score = tmu.mask_by_length(score, seq_lens)
-    log_prob = score.sum(-1) - log_Z
-    return log_prob
-
-  def marginal(self, seq, emission_scores, seq_lens):
-    """Marginal distribution with conventional forward-backward"""
-    alpha, log_Z = self.forward_score(emission_scores, seq_lens)
-    beta = self.backward_score(emission_scores, seq_lens)
-
-    # select weight according to the index to be evaluated
-    batch_size = seq.size(0)
-    max_len = seq.size(1)
-    alpha_ = alpha.view(batch_size * max_len, -1)
-    alpha_ = tmu.batch_index_select(alpha_, seq.view(-1))
-    alpha_ = alpha_.view(batch_size, max_len)
-    beta_ = beta.view(batch_size * max_len, -1)
-    beta_ = tmu.batch_index_select(beta_, seq.view(-1))
-    beta_ = beta_.view(batch_size, max_len)
-    log_marginal = alpha_ + beta_ - log_Z.unsqueeze(1)
-    return log_marginal
-
-  def rargmax(self, emission_scores, seq_lens):
-    """Relaxed Argmax from the CRF, Viterbi decoding.
-
-    Everything is the same with pmsample except not using the gumbel noise
-    """
-    device = emission_scores.device
-
-    all_scores = self.calculate_all_scores(emission_scores)
-    batch_size = all_scores.size(0)
-    seq_len = all_scores.size(1)
-
-    s = torch.zeros(batch_size, seq_len, self.label_size).to(device)
-    s[:, 0] = emission_scores[:, 0] 
-
-    # [B, T, from C, to C]
-    bp = torch.zeros(batch_size, seq_len, self.label_size, self.label_size)
-    bp = bp.to(device)
-    
-    # forward viterbi
-    for t in range(1, seq_len):
-      s_ = s[:, t - 1].unsqueeze(2) + all_scores[:, t] # [B, from C, to C]
-      s[:, t] = s_.max(dim=1)[0] # [B, C]
-      bp[:, t] = torch.softmax(s_ / tau, dim=1)
-
-    # backtracking
-    s = tmu.reverse_sequence(s, seq_lens)
-    bp = tmu.reverse_sequence(bp, seq_lens)
-    y = torch.zeros(batch_size, seq_len, self.label_size).to(device)
-    y[:, 0] = torch.softmax(s[:, 0] / tau, dim=1)
-    for t in range(1, seq_len):
-      y_ = y[:, t-1].argmax(dim=1) # [B]
-      y[:, t] = tmu.batch_index_select(
-        bp[:, t-1].transpose(1, 2), # [B, to C, from C]
-        y_ 
-        )
-    y = tmu.reverse_sequence(y, seq_lens)
-    y_hard = y.argmax(dim=2)
-    return y_hard, y
-
-  def pmsample(self, emission_scores, seq_lens, tau):
-    """Perturb-and-MAP sampling, a relaxed Viterbi with Gumbel-perturbation
-
-    Args:
-      emission_scores: type=torch.tensor(float), 
-        size=[batch, max_len, num_class]
-      seq_lens: type=torch.tensor(int), size=[batch]
-      tau: type=float, anneal strength
-
-    Returns
-      sample: size=[batch, max_len]
-      relaxed_sample: size=[batch, max_len, num_class]
-    """
-
-    device = emission_scores.device
-
-    all_scores = self.calculate_all_scores(emission_scores)
-    all_scores += tmu.sample_gumbel(all_scores.size()).to(device)
-    batch_size = all_scores.size(0)
-    seq_len = all_scores.size(1)
-
-    s = torch.zeros(batch_size, seq_len, self.label_size).to(device)
-    s[:, 0] = emission_scores[:, 0] 
-    s[:, 0] += tmu.sample_gumbel(emission_scores[:, 0].size()).to(device)
-
-    # [B, T, from C, to C]
-    bp = torch.zeros(batch_size, seq_len, self.label_size, self.label_size)
-    bp = bp.to(device)
-    
-    # forward viterbi
-    for t in range(1, seq_len):
-      s_ = s[:, t - 1].unsqueeze(2) + all_scores[:, t] # [B, from C, to C]
-      s[:, t] = s_.max(dim=1)[0] # [B, C]
-      bp[:, t] = torch.softmax(s_ / tau, dim=1)
-
-    # backtracking
-    s = tmu.reverse_sequence(s, seq_lens)
-    bp = tmu.reverse_sequence(bp, seq_lens)
-    y = torch.zeros(batch_size, seq_len, self.label_size).to(device)
-    y[:, 0] = torch.softmax(s[:, 0] / tau, dim=1)
-    for t in range(1, seq_len):
-      y_ = y[:, t-1].argmax(dim=1) # [B]
-      y[:, t] = tmu.batch_index_select(
-        bp[:, t-1].transpose(1, 2), # [B, to C, from C]
-        y_ )
-    y = tmu.reverse_sequence(y, seq_lens)
-    y_hard = y.argmax(dim=2)
-    return y_hard, y
-
-  def rsample(self, emission_scores, seq_lens, tau, 
+  def rsample(self, emission_scores, transition_scores, seq_lens, tau, 
     return_switching=False, return_prob=False):
     """Reparameterized CRF sampling, a Gumbelized version of the 
     Forward-Filtering Backward-Sampling algorithm
@@ -295,7 +148,7 @@ class LinearChainCRF(nn.Module):
       sample: size=[batch, max_len]
       relaxed_sample: size=[batch, max_len, num_class]
     """
-    all_scores = self.calculate_all_scores(emission_scores)
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
     alpha, log_Z = self.forward_score(emission_scores, seq_lens)
 
     batch_size = emission_scores.size(0)
@@ -366,7 +219,7 @@ class LinearChainCRF(nn.Module):
       ret.extend([sample_log_prob, sample_log_prob_stepwise])
     return ret
 
-  def entropy(self, emission_scores, seq_lens):
+  def entropy(self, emission_scores, transition_scores, seq_lens):
     """The entropy of the CRF, another DP algorithm. See the write up
     
     Args:
@@ -377,7 +230,7 @@ class LinearChainCRF(nn.Module):
       H_total: the entropy, type=torch.Tensor(float), size=[batch]
     """
 
-    all_scores = self.calculate_all_scores(emission_scores)
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
     alpha, log_Z = self.forward_score(emission_scores, seq_lens)
 
     batch_size = emission_scores.size(0)
@@ -409,12 +262,12 @@ class LinearChainCRF(nn.Module):
     H_total = H_total.sum(dim = -1)
     return H_total
   
-  def marginals(self, emission_scores, seq_lens):
-    all_scores = self.calculate_all_scores(emission_scores)
+  def marginals(self, emission_scores, transition_scores, seq_lens):
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
     return dist.marginals
 
-  def argmax(self, emission_scores, seq_lens):
-    all_scores = self.calculate_all_scores(emission_scores)
+  def argmax(self, emission_scores, transition_scores, seq_lens):
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
     return dist.argmax.max(-1)[0].argmax(-1)

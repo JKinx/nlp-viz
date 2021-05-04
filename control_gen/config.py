@@ -12,11 +12,9 @@ class Config:
     ## Dataset 
     self.data_root = '../data/'
     self.data_path = ""
-
-    self.max_sent_len = 37 
-    self.max_dec_len = 38
-    self.max_bow_len = 37
-    self.max_mem_len = 16 
+    
+    self.max_y_len = 50
+    self.max_x_len = 50
     
     self.pad_id = 0
     self.start_id = 1
@@ -36,7 +34,7 @@ class Config:
     # general
     self.is_test = False
     self.test_validate = False
-    self.use_tensorboard = True
+    self.use_tensorboard = False
     self.write_full_predictions = False
     self.device = 'cuda'
     self.gpu_id = '0'
@@ -69,9 +67,6 @@ class Config:
     self.validation_criteria = 'marginal'
 
     # optimization
-    self.seperate_optimizer = False
-    self.enc_learning_rate = 1e-4
-    self.dec_learning_rate = 1e-4
     self.learning_rate = 1e-4
 
     # latent z
@@ -84,21 +79,11 @@ class Config:
 
     self.z_lambd = 1.0 # learning signal scaling
     self.z_beta = 0.01 # entropy regularization 
-    self.z_overlap_logits = False # if overlap the z logits
-    self.z_lambd_supervised = 1.0 # supervised loss for z 
-    self.gumbel_st = True # if use gumbel-straight through estimator 
 
     # Anneal tau 
     self.z_tau_init = 1.0
     self.z_tau_final = 0.01
     self.tau_anneal_epoch = 40
-
-    self.z_sample_method = 'gumbel_ffbs' # 'gumbel_ffbs', 'pm'
-
-    self.dec_adaptive = False 
-    self.auto_regressive = True 
-    self.use_copy = True  
-    self.use_src_info = True
 
     # anneal word dropout
     self.x_lambd_start_epoch = 10
@@ -108,19 +93,6 @@ class Config:
     self.pr = False
     self.pr_inc_lambd = None
     self.pr_exc_lambd = None
-    self.num_pr_constraints = 5
-
-    # decoding 
-    self.z_pred_strategy = 'greedy'
-    self.x_pred_strategy = 'greedy'
-    
-    # 'random', 'closest', 'inclusive_closest', 'topk', 'topk-random'
-    self.temp_rank_strategy = 'random' 
-
-    # 'greedy', 'sampling_unconstrained', 'sampling_topk', 'sampling_topp_adapt'
-    self.decode_strategy = 'greedy'
-    self.sampling_topk_k = 2
-    self.sampling_topp_gap = 0.1
 
     self.max_grad_norm = 1.
     self.p_max_grad_norm = 1.
@@ -133,19 +105,10 @@ class Config:
     self.embedding_size = -1 # the same as state size
     self.state_size = 300 # 650 for LM on PTB
     self.dropout = 0.2 # 0.5 for LM on PTB
-    self.copy_decoder = True 
-    self.cum_attn = False
-
-    # latent bow
-    self.bow_deterministic = False
-    self.num_bow_mixture = 3
+    self.tapas_state_size = 768
 
     # latent template
-    self.num_sample = 3
-    self.sample_strategy = 'topk' # [topk, unconstrained, greedy]
-    self.use_gumbel = False
     self.gumbel_tau = 1.0
-    self.stepwise_score = False
 
   def overwrite(self, args):
     args = vars(args)

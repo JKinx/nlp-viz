@@ -41,11 +41,9 @@ def define_argument(config):
     
   # dataset len
   parser.add_argument(
-    "--max_dec_len", default=config.max_dec_len, type=int)
+    "--max_x_len", default=config.max_x_len, type=int)
   parser.add_argument(
-    "--max_bow_len", default=config.max_bow_len, type=int)
-  parser.add_argument(
-    "--max_mem_len", default=config.max_mem_len, type=int)
+    "--max_y_len", default=config.max_y_len, type=int)
 
   # train
   parser.add_argument(
@@ -90,60 +88,16 @@ def define_argument(config):
   parser.add_argument(
     "--learning_rate", default=config.learning_rate, type=float)
   parser.add_argument(
-    "--enc_learning_rate", default=config.enc_learning_rate, type=float)
-  parser.add_argument(
-    "--dec_learning_rate", default=config.dec_learning_rate, type=float)
-  parser.add_argument(
-    "--bow_lambd", default=config.bow_lambd, type=float)
-  parser.add_argument(
-    "--bow_beta", default=config.bow_beta, type=float)
-  parser.add_argument(
-    "--bow_gamma", default=config.bow_gamma, type=float)
-  parser.add_argument(
-    "--bow_deterministic", type=str2bool, 
-    nargs='?', const=True, default=config.bow_deterministic)
-  parser.add_argument(
-    "--z_sample_method", default=config.z_sample_method, type=str)
-  parser.add_argument(
-    "--z_beta", default=config.z_beta, type=float)
-  parser.add_argument(
-    "--z_overlap_logits", type=str2bool, 
-    nargs='?', const=True, default=config.z_overlap_logits)  
+    "--z_beta", default=config.z_beta, type=float) 
   parser.add_argument(
     "--z_tau_final", default=config.z_tau_final, type=float)
   parser.add_argument(
     "--tau_anneal_epoch", type=int, default=config.tau_anneal_epoch)  
   parser.add_argument(
-    "--gumbel_st", type=str2bool, 
-    nargs='?', const=True, default=config.gumbel_st)  
-  parser.add_argument(
-    "--dec_adaptive", type=str2bool, 
-    nargs='?', const=True, default=config.dec_adaptive)  
-  parser.add_argument(
-    "--auto_regressive", type=str2bool, 
-    nargs='?', const=True, default=config.auto_regressive)  
-  parser.add_argument(
-    "--use_copy", type=str2bool, 
-    nargs='?', const=True, default=config.use_copy)  
-  parser.add_argument(
-    "--use_src_info", type=str2bool, 
-    nargs='?', const=True, default=config.use_src_info) 
-  parser.add_argument(
     "--x_lambd_start_epoch", default=config.x_lambd_start_epoch, type=int)
   parser.add_argument(
     "--x_lambd_anneal_epoch", default=config.x_lambd_anneal_epoch, type=int)
-  parser.add_argument(
-    "--temp_rank_strategy", default=config.temp_rank_strategy, type=str)
-  parser.add_argument(
-    "--z_pred_strategy", default=config.z_pred_strategy, type=str)
-  parser.add_argument(
-    "--x_pred_strategy", default=config.x_pred_strategy, type=str)
-  parser.add_argument(
-    "--decode_strategy", default=config.decode_strategy, type=str)
-  parser.add_argument(
-    "--sampling_topk_k", default=config.sampling_topk_k, type=int)
-  parser.add_argument(
-    "--sampling_topp_gap", default=config.sampling_topp_gap, type=float)
+
 
   # model 
   parser.add_argument(
@@ -158,26 +112,11 @@ def define_argument(config):
     "--state_size", default=config.state_size, type=int)
   parser.add_argument(
     "--dropout", default=config.dropout, type=float)
-  parser.add_argument(
-    "--copy_decoder", type=str2bool, 
-    nargs='?', const=True, default=config.copy_decoder)  
-  parser.add_argument(
-    "--latent_vocab_size", default=config.latent_vocab_size, type=int)
-  parser.add_argument(
-    "--num_sample", default=config.num_sample, type=int)
-  parser.add_argument(
-    "--sample_strategy", default=config.sample_strategy, type=str)
-  parser.add_argument(
-    "--stepwise_score", type=str2bool, 
-    nargs='?', const=True, default=config.stepwise_score)
 
   # pr
-    
   parser.add_argument(
     "--pr", type=str2bool, 
     nargs='?', const=True)
-  parser.add_argument(
-    "--num_pr_constraints", default=config.num_pr_constraints, type=int)
   parser.add_argument(
     "--pr_inc_lambd", default=config.pr_inc_lambd, type=float)
   parser.add_argument(
@@ -206,9 +145,10 @@ def set_argument(config, args):
   ## overwrite the default configuration  
   config.overwrite(args)
   config.embedding_size = config.state_size
-
+  
+  config.use_tensorboard = False
+    
   if(config.test_validate): 
-    config.use_tensorboard = False
     config.validate_start_epoch = 0
 
   ## build model saving path 
@@ -246,22 +186,10 @@ def set_argument(config, args):
   config.output_path = output_path + '/'
   config.tensorboard_path = tensorboard_path + '/'
   
-#   config.data_path = {
-#     'train': config.data_root + config.dataset + '/trainset.csv', 
-#     'dev': config.data_root + config.dataset + '/devset.csv', 
-#     'test': config.data_root + config.dataset + '/testset_w_refs.csv',
-#     }
-  
-#   config.data_path = {
-#     'train': config.data_root + config.dataset + '/trainset.pkl', 
-#     'dev': config.data_root + config.dataset + '/devset.pkl', 
-#     'test': config.data_root + config.dataset + '/testset.pkl',
-#     }
- 
   config.data_path = {
-    'train': config.data_root + config.dataset + '/trainset_notable.pkl', 
-    'dev': config.data_root + config.dataset + '/devset_notable.pkl', 
-    'test': config.data_root + config.dataset + '/testset_notable.pkl',
+    'train': config.data_root + config.dataset + '/trainset_dynamic.pkl', 
+    'dev': config.data_root + config.dataset + '/devset_dynamic.pkl', 
+    'test': config.data_root + config.dataset + '/testset_dynamic.pkl',
     }
   
   config.write_arguments()

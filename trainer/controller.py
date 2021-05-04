@@ -64,20 +64,15 @@ class Controller(object):
     self.batch_size_train = config.batch_size_train
     self.batch_size_eval = config.batch_size_eval
     self.end_id = config.end_id
-    self.latent_vocab_size = config.latent_vocab_size
-
-    self.use_gumbel = config.use_gumbel
 
     self.z_tau_init = config.z_tau_init
     self.z_tau_final = config.z_tau_final
     self.tau_anneal_epoch = config.tau_anneal_epoch
     self.x_lambd_start_epoch = config.x_lambd_start_epoch
     self.x_lambd_anneal_epoch = config.x_lambd_anneal_epoch
-    self.num_sample = config.num_sample
-    self.max_dec_len = config.max_dec_len
 
-    self.temp_rank_strategy = config.temp_rank_strategy
-    self.decode_strategy = config.decode_strategy
+    self.max_x_len = config.max_x_len
+    self.max_y_len = config.max_y_len
 
     self.max_grad_norm = config.max_grad_norm
     self.p_max_grad_norm = config.p_max_grad_norm

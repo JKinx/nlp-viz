@@ -309,7 +309,7 @@ def reparameterize_gumbel(logits, tau):
   y = logits + sample_gumbel(logits.size()).to(logits.device)
   return F.softmax(y / tau, dim=-1)
 
-def seq_gumbel_encode(sample, sample_ids, embeddings, gumbel_st):
+def seq_gumbel_encode(sample, sample_ids, sample_emb):
   """Encoding of gumbel sample. Given a sequence of relaxed one-hot 
   representations, return a sequence of corresponding embeddings
 
@@ -324,24 +324,14 @@ def seq_gumbel_encode(sample, sample_ids, embeddings, gumbel_st):
   batch_size = sample.size(0)
   max_len = sample.size(1)
   vocab_size = sample.size(2)
-  if(gumbel_st):
-    # straight-through version, to avoid training-inference gap 
-    sample_emb = embeddings(sample_ids)
-    sample_one_hot = ind_to_one_hot(
-      sample_ids.view(-1), vocab_size)
-    sample_one_hot =\
-      sample_one_hot.view(batch_size, max_len, vocab_size)
-    sample_soft = sample.masked_select(sample_one_hot)
-    sample_soft = sample_soft.view(batch_size, max_len, 1)
-    sample_emb *= (1 - sample_soft).detach() + sample_soft
-  else:
-    # original version, requires annealing in the end of training
-    sample_emb = torch.matmul(
-      sample.view(-1, vocab_size), embeddings.weight)
-    embedding_size = sample_emb.size(-1)
-    # [batch * max_len, embedding_size] -> [batch, max_len, embedding_size]
-    sample_emb = sample_emb.view(
-      batch_size, max_len, embedding_size)
+    
+  sample_one_hot = ind_to_one_hot(
+    sample_ids.view(-1), vocab_size)
+  sample_one_hot =\
+    sample_one_hot.view(batch_size, max_len, vocab_size)
+  sample_soft = sample.masked_select(sample_one_hot)
+  sample_soft = sample_soft.view(batch_size, max_len, 1)
+  sample_emb *= (1 - sample_soft).detach() + sample_soft
   return sample_emb
 
 def reparameterize_gaussian(mu, logvar):

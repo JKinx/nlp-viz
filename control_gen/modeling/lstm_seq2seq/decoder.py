@@ -85,41 +85,26 @@ class LSTMDecoder(nn.Module):
     self.vocab_size = config.vocab_size
     self.pad_id = config.pad_id
     self.start_id = config.start_id
-    self.max_dec_len = config.max_dec_len
-    self.decode_strategy = config.decode_strategy 
-    self.topk_k = config.sampling_topk_k
-    self.topp_gap = config.sampling_topp_gap
+    self.max_dec_len = config.max_y_len + 1
 
     if(config.lstm_layers == 1): dropout = 0.
     else: dropout = config.dropout
+
     self.cell = nn.LSTM(input_size=config.embedding_size, 
                         hidden_size=self.state_size,
                         num_layers=config.lstm_layers,
                         dropout=dropout)
 
     self.attention = Attention(
-      config.state_size, config.state_size, config.embedding_size)
-    if(config.cum_attn):
-      # cumulative attention TBC 
-      self.cum_attn = Attention(
-        config.state_size, config.state_size, config.state_size)
-    self.hetero_attn = Attention(
-      config.state_size, config.embedding_size, config.embedding_size)
+      config.state_size, config.tapas_state_size, config.embedding_size)
 
     self.dropout = nn.Dropout(config.dropout)
     self.attn_cont_proj = nn.Linear(
       2 * config.embedding_size, config.embedding_size)
     self.output_proj = nn.Linear(self.state_size, config.vocab_size)
-
-    self.copy = config.copy_decoder
-    if(self.copy):
-      self.copy_g = nn.Linear(config.state_size, 1)
-      self.copy_attn = Attention(
-        config.state_size, config.state_size, config.state_size)
     return 
 
-  def forward(self, inp, state, memory=None, mem_mask=None, 
-    hetero_mem=None, hetero_mem_mask=None):
+  def forward(self, inp, state, memory=None, mem_mask=None):
     """
     Args: 
       state = (h, c)
@@ -134,10 +119,6 @@ class LSTMDecoder(nn.Module):
     context_vec = None
     if(memory is not None):
       context_vec, attn_dist = self.attention(query, memory, mem_mask)
-    if(hetero_mem is not None):
-      context_hetero, hetero_attn_dist =\
-        self.hetero_attn(query, hetero_mem, hetero_mem_mask)
-      context_vec += context_hetero
 
     if(context_vec is not None):
       inp = self.attn_cont_proj(torch.cat([inp, context_vec], dim=1))
@@ -145,108 +126,3 @@ class LSTMDecoder(nn.Module):
 
     out = self.dropout(out)
     return out, state
-
-  def decode_train(self, init_state, mem, mem_emb, mem_mask, 
-    dec_inputs, dec_targets, hetero_mem=None, hetero_mask=None):
-    """Decoder training loop
-    
-    Args:
-      init_state: (h, c), h.size=[], c.size=[]
-      mem: size=[batch, max_mem]
-      mem_emb: size=[batch, max_mem, state]
-      mem_mask: size=[batch, max_mem]
-      dec_inputs: size=[batch, max_len, state]
-      dec_targets: size=[batch, max_len]
-    """
-    batch_size = dec_inputs.size(0)
-    max_dec_len = dec_targets.size(1)
-
-    state = init_state
-    dec_inputs = dec_inputs.transpose(0, 1)
-    dec_targets = dec_targets.transpose(0, 1)
-    log_prob = []
-    predictions = []
-    for i in range(max_dec_len):
-      dec_out, state = self.forward(
-        dec_inputs[i], state, mem_emb, mem_mask, hetero_mem, hetero_mask)
-      dec_out = dec_out[0]
-      lm_logits = self.output_proj(dec_out)
-      lm_prob = F.softmax(lm_logits, dim=-1)
-      if(self.copy):
-        _, copy_dist = self.copy_attn(dec_out, mem_emb, mem_mask)
-        copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
-        copy_g = torch.sigmoid(self.copy_g(dec_out))
-        out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
-        logits = out_prob.log()
-        log_prob_i = -F.cross_entropy(logits, dec_targets[i], reduction='none')
-      else:
-        logits = lm_logits
-        out_prob = lm_prob
-        log_prob_i = -F.cross_entropy(logits, dec_targets[i], reduction='none')
-
-      log_prob.append(log_prob_i)
-      predictions.append(logits.argmax(dim=-1))
-
-    log_prob = torch.stack(log_prob) # [T, B]
-    mask = dec_targets != self.pad_id
-    log_prob.masked_fill_(mask == 0, 0.) 
-    log_prob = log_prob.sum() / mask.sum()
-    predictions = torch.stack(predictions).transpose(0, 1)
-    return log_prob, predictions
-
-  def decode_infer(self, init_state, embeddings, mem, mem_emb, mem_mask, 
-    hetero_mem=None, hetero_mask=None):
-    """Greedy decoding"""
-    batch_size = init_state[0].size(1)
-    device = init_state[0].device
-
-    state = init_state
-    inp = torch.zeros(batch_size).type(torch.long).to(device) + self.start_id
-    inp = embeddings(inp)
-    predictions = []
-    max_dec_len = self.max_dec_len
-    for i in range(max_dec_len):
-      dec_out, state = self.forward(
-        inp, state, mem_emb, mem_mask, hetero_mem, hetero_mask)
-      dec_out = dec_out[0]
-      lm_logits = self.output_proj(dec_out)
-      lm_prob = F.softmax(lm_logits, dim=-1)
-      if(self.copy):
-        _, copy_dist = self.copy_attn(dec_out, mem_emb, mem_mask)
-        copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
-        copy_g = torch.sigmoid(self.copy_g(dec_out))
-        out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
-        logits = out_prob.log()
-      else:
-        logits = lm_logits
-        out_prob = lm_prob
-
-      if(self.decode_strategy == 'greedy'):
-        out = logits.argmax(dim=-1)
-      elif(self.decode_strategy == 'sampling_unconstrained'):
-        dist = Categorical(logits=logits)
-        out = dist.sample()
-      elif(self.decode_strategy == 'sampling_topk'):
-        prob, ind = torch.topk(out_prob, self.topk_k, -1)
-        prob /= prob.sum(dim=-1, keepdim=True)
-        dist = Categorical(probs=prob)
-        out_ = dist.sample()
-        out = tmu.batch_index_select(ind, out_).squeeze()
-      elif(self.decode_strategy == 'sampling_topp_adapt'):
-        # adaptive top p sampling 
-        prob_max, _ = out_prob.max(dim=-1, keepdim=True)
-        prob_baseline = prob_max - self.topp_gap
-        prob_mask = out_prob < prob_baseline
-        prob_sample = out_prob.masked_fill(prob_mask, 0.)
-        prob_sample /= prob_sample.sum(dim=-1, keepdim=True)
-        dist = Categorical(prob_sample)
-        out = dist.sample()
-      else:
-        raise NotImplementedError('decoding method %s not implemented!' % 
-          self.decode_strategy)
-
-      inp = embeddings(out)
-      predictions.append(out)
-
-    predictions = torch.stack(predictions).transpose(0, 1) # [B, T]
-    return predictions

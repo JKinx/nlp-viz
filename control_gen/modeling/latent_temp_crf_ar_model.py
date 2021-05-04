@@ -15,12 +15,12 @@ class LatentTemplateCRFARModel(FTModel):
 
     self.model = LatentTemplateCRFAR(config)
     
-    q_encoder_params = [el[1] for el in self.model.named_parameters() \
-                       if "q_encoder" in el[0]]
+    tapas_params = [el[1] for el in self.model.named_parameters() \
+                       if "tapas" in el[0]]
     other_params = [el[1] for el in self.model.named_parameters() \
-                       if "q_encoder" not in el[0]]
+                       if "tapas" not in el[0]]
     
-    self.q_optimizer = AdamW(q_encoder_params, lr=5e-5)
+    self.tapas_optimizer = AdamW(tapas_params, lr=5e-5)
     self.other_optimizer = Adam(other_params, lr=config.learning_rate)
 
     self.dataset = config.dataset
@@ -29,31 +29,26 @@ class LatentTemplateCRFARModel(FTModel):
 
     self.dataset = config.dataset
     self.device = config.device
-    self.temp_rank_strategy = config.temp_rank_strategy
     return 
 
   def train_step(self, batch, n_iter, ei, bi, schedule_params):
     model = self.model
     sentences = torch.from_numpy(batch['sentences']).to(self.device)
 
+    data_dict = {}
+    for key in batch:
+      data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
+
     model.zero_grad()
     loss, out_dict = model(
-      keys=torch.from_numpy(batch['keys']).to(self.device),
-      vals=torch.from_numpy(batch['vals']).to(self.device),
-      sentences=sentences,
-      sent_lens=torch.from_numpy(batch['sent_lens']).to(self.device),
+      data_dict=data_dict,
       tau=schedule_params['tau'], 
-      x_lambd=schedule_params['x_lambd'],
-      return_grad=False,
-      zcs=torch.from_numpy(batch['zcs']).to(self.device),
-      t_input_ids = torch.from_numpy(batch['t_input_ids']).to(self.device),
-      t_attn_mask = torch.from_numpy(batch['t_attn_mask']).to(self.device),
-      t_token_type_ids = torch.from_numpy(batch['t_token_type_ids']).to(self.device)
+      x_lambd=schedule_params['x_lambd']
       )
 
     loss.backward()
     clip_grad_norm_(model.parameters(), self.max_grad_norm)
-    self.q_optimizer.step()
+    self.tapas_optimizer.step()
     self.other_optimizer.step()
 
     out_dict['tau'] = schedule_params['tau']
@@ -63,14 +58,11 @@ class LatentTemplateCRFARModel(FTModel):
   def valid_step(self, template_manager, batch, n_iter, ei, bi, 
     mode='dev', dataset=None, schedule_params=None):
     """Single batch validation"""
-
-    model = self.model
-    batch_c = batch
+    data_dict = {}
+    for key in batch:
+      data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
 
     with torch.no_grad():
-      out_dict = model.infer(
-        keys=torch.from_numpy(batch_c['keys']).to(self.device),
-        vals=torch.from_numpy(batch_c['vals']).to(self.device)
-        )
+      out_dict = model.infer(data_dict)
     
     return out_dict
