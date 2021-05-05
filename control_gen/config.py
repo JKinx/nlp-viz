@@ -52,7 +52,7 @@ class Config:
     # logging info during training 
     self.log_info = [
         'loss', 
-        'tau', 'x_lambd', 
+        'tau', 'x_lambd', "z_beta",
         'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
         'ent_z', 'ent_z_loss', 'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
         ]
@@ -70,13 +70,12 @@ class Config:
     # latent z
     self.latent_vocab_size = 50
 
-    self.y_beta = 0. # KLD for y 
-    self.bow_beta = 0. # BOW KLD/ entropy regularization
-    self.bow_lambd = 1.0 # BOW loss
-    self.bow_gamma = 1.0 # stepwise bow loss
-
-    self.z_lambd = 1.0 # learning signal scaling
     self.z_beta = 0.01 # entropy regularization 
+    
+    self.z_beta_anneal = True
+    self.z_beta_init = 0
+    self.z_beta_final = 1
+    self.z_beta_anneal_epoch = 2
 
     # Anneal tau 
     self.z_tau_init = 1.0

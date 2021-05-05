@@ -69,7 +69,14 @@ class Controller(object):
     self.tau_anneal_epoch = config.tau_anneal_epoch
     self.x_lambd_start_epoch = config.x_lambd_start_epoch
     self.x_lambd_anneal_epoch = config.x_lambd_anneal_epoch
-
+    
+    # KL annealing
+    self.z_beta_anneal = config.z_beta_anneal
+    self.z_beta = config.z_beta
+    self.z_beta_init = config.z_beta_init
+    self.z_beta_final = config.z_beta_final
+    self.z_beta_anneal_epoch = config.z_beta_anneal_epoch
+    
     self.max_x_len = config.max_x_len
     self.max_y_len = config.max_y_len
 
@@ -144,6 +151,10 @@ class Controller(object):
     self.train_num_batches = num_batches
     self.schedule_params['tau_decrease_interval'] =\
       (self.z_tau_init - self.z_tau_final) / (tau_total_iter - 1)
+    
+    z_beta_total_iter = num_batches * self.z_beta_anneal_epoch
+    self.schedule_params['z_beta_increase_interval'] =\
+      (self.z_beta_final - self.z_beta_init) / (z_beta_total_iter - 1)
 
     if(self.x_lambd_anneal_epoch > 0):
       tau_total_iter_lambd = num_batches * self.x_lambd_anneal_epoch
@@ -154,12 +165,21 @@ class Controller(object):
 
     self.schedule_params['tau'] = self.z_tau_init
     self.schedule_params['x_lambd'] = 1.
+    
+    self.schedule_params['z_beta'] = self.z_beta_init
     return 
 
   def scheduler_step(self, n_iter, ei, bi):
     self.schedule_params['tau'] -= self.schedule_params['tau_decrease_interval']
     if(self.schedule_params['tau'] < self.z_tau_final): 
       self.schedule_params['tau'] = self.z_tau_final
+    
+    if self.z_beta_anneal:
+        self.schedule_params['z_beta'] += self.schedule_params['z_beta_increase_interval']
+        if(self.schedule_params['z_beta'] > self.z_beta_final): 
+          self.schedule_params['z_beta'] = self.z_beta_final
+    else:
+        self.schedule_params['z_beta'] = self.z_beta
 
     if(ei >= self.x_lambd_start_epoch):
       self.schedule_params['x_lambd'] -=\

@@ -87,8 +87,15 @@ def define_argument(config):
   # optimization
   parser.add_argument(
     "--learning_rate", default=config.learning_rate, type=float)
+
   parser.add_argument(
     "--z_beta", default=config.z_beta, type=float) 
+  parser.add_argument(
+    "--z_beta_anneal", type=str2bool, 
+    nargs='?', const=True, default=config.z_beta_anneal)
+  parser.add_argument(
+    "--z_beta_anneal_epoch", type=int, default=config.z_beta_anneal_epoch) 
+    
   parser.add_argument(
     "--z_tau_final", default=config.z_tau_final, type=float)
   parser.add_argument(
@@ -199,7 +206,7 @@ def set_argument(config, args):
   os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_id
 
   ## print out the final configuration
-  config.print_arguments()
+#   config.print_arguments()
   return config
 
 def main():

@@ -45,7 +45,9 @@ class LatentTemplateCRFARModel(FTModel):
     loss, out_dict = model(
       data_dict=data_dict,
       tau=schedule_params['tau'], 
-      x_lambd=schedule_params['x_lambd']
+      x_lambd=schedule_params['x_lambd'],
+      z_beta= schedule_params['z_beta'],
+      bi = bi
       )
 
     loss.backward()
@@ -55,6 +57,7 @@ class LatentTemplateCRFARModel(FTModel):
 
     out_dict['tau'] = schedule_params['tau']
     out_dict['x_lambd'] = schedule_params['x_lambd']
+    out_dict['z_beta'] = schedule_params['z_beta']
     return out_dict
 
   def valid_step(self, template_manager, batch, n_iter, ei, bi, 
