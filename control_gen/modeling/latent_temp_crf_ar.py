@@ -130,13 +130,13 @@ class LatentTemplateCRFAR(nn.Module):
         self.crf_y_header(outputs[:,:self.max_y_len+1]),
         outputs[:,self.max_y_len+2:].transpose(1,2)
     )
-    y_header = y_header.masked_fill(y_header_mask == 0, -1e9)
+#     y_header = y_header.masked_fill(y_header_mask == 0, -1e9)
     
     header_self = torch.bmm(
         self.crf_header_self(outputs[:,self.max_y_len+2:]),
         outputs[:,self.max_y_len+2:].transpose(1,2)
     )
-    header_self = header_self.masked_fill(header_self_mask == 0, -1e9)
+#     header_self = header_self.masked_fill(header_self_mask == 0, -1e9)
     
     return header_self, y_header
     

@@ -59,8 +59,6 @@ class Config:
 
     # scores to be reported during validation 
     self.validation_scores = [
-        'ent_z', 'elbo', 'marginal', 'p_log_prob', 'z_sample_log_prob', 'ppl', 
-        'p_log_prob_x', 'p_log_prob_z', 'z_acc'
         ]
 
     # validation criteria for different models 
