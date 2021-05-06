@@ -39,10 +39,10 @@ class Config:
     self.device = 'cuda'
     self.gpu_id = '0'
     self.start_epoch = 0
-    self.validate_start_epoch = 8
+    self.validate_start_epoch = 0
     self.num_epoch = 30
-    self.batch_size_train = 500
-    self.batch_size_eval = 100
+    self.batch_size_train = 40
+    self.batch_size_eval = 50
     self.print_interval = 200 
     self.load_ckpt = False
     self.save_ckpt = False # if save checkpoints
@@ -62,7 +62,7 @@ class Config:
         ]
 
     # validation criteria for different models 
-    self.validation_criteria = 'marginal'
+    self.validation_criteria = 'b2'
 
     # optimization
     self.learning_rate = 1e-4

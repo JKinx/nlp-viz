@@ -164,9 +164,11 @@ class Controller(object):
       self.schedule_params['x_lambd_decrease_interval'] = 1
 
     self.schedule_params['tau'] = self.z_tau_init
-    self.schedule_params['x_lambd'] = 1.
+    self.schedule_params['x_lambd'] = 0.
     
     self.schedule_params['z_beta'] = self.z_beta_init
+    
+    self.x_lambd_iter = 0
     return 
 
   def scheduler_step(self, n_iter, ei, bi):
@@ -182,8 +184,11 @@ class Controller(object):
         self.schedule_params['z_beta'] = self.z_beta
 
     if(ei >= self.x_lambd_start_epoch):
-      self.schedule_params['x_lambd'] -=\
-        self.schedule_params['x_lambd_decrease_interval']
+      self.x_lambd_iter += 1
+      self.schedule_params['x_lambd'] = 1 - \
+        self.x_lambd_iter * self.schedule_params['x_lambd_decrease_interval']
+#       self.schedule_params['x_lambd'] -=\
+#         self.schedule_params['x_lambd_decrease_interval']
       if(self.schedule_params['x_lambd'] < 0.): 
         self.schedule_params['x_lambd'] = 0.
     return 

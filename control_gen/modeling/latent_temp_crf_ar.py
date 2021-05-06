@@ -180,12 +180,12 @@ class LatentTemplateCRFAR(nn.Module):
     # entropy regularization
     ent_z = self.z_crf.entropy(z_emission_scores, z_transition_scores,
       sent_lens).mean()
-#     loss += 0.05 * z_beta * ent_z
+#     loss += z_beta * ent_z
 #     out_dict['ent_z'] = tmu.to_np(ent_z)
-#     out_dict['ent_z_loss'] = 0.05 * z_beta * tmu.to_np(ent_z)
-    loss += 0.01  * ent_z
+#     out_dict['ent_z_loss'] = z_beta * tmu.to_np(ent_z)
+    loss += 0.05  * ent_z
     out_dict['ent_z'] = tmu.to_np(ent_z)
-    out_dict['ent_z_loss'] = 0.01 * tmu.to_np(ent_z)
+    out_dict['ent_z_loss'] = 0.05 * tmu.to_np(ent_z)
     
     z_sample_ids, z_sample, _ = self.z_crf.rsample(
         z_emission_scores, z_transition_scores, sent_lens, tau,
@@ -333,6 +333,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     log_prob_x = log_prob_x.sum() / sent_lens.sum()
     log_prob_z = log_prob_z.sum() / sent_lens.sum()
+    z_beta = 1
     log_prob = log_prob_x + z_beta * log_prob_z
 
     # acc 
