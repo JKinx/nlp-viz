@@ -48,6 +48,8 @@ class Config:
     self.save_ckpt = False # if save checkpoints
     self.all_pretrained_path = ''
     self.save_temp = False
+    
+    self.grad_accum = 1
 
     # logging info during training 
     self.log_info = [

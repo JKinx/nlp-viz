@@ -247,9 +247,6 @@ class LinearChainCRF(nn.Module):
         alpha[:, t, :].view(batch_size, num_class, 1) -\
         alpha[:, t+1, :].view(batch_size, 1, num_class)
       w = log_w.exp()
-      # DEBUG
-      # print(t)
-      # print(w) # expect all 1 tensors
       H[:, t+1, :] = torch.sum(
         w * (H[:, t, :].view(batch_size, num_class, 1) - log_w), dim=1)
     
@@ -263,16 +260,6 @@ class LinearChainCRF(nn.Module):
     H_total = p_T * (H_last - log_p_T)
     H_total = H_total.sum(dim = -1)
     return H_total
-
-#   def rsample(self, emission_scores, transition_scores, seq_lens, tau):
-#     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
-#     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
-#     return dist.gumbel_crf(tau).sum(-1)
-
-#   def entropy(self, emission_scores, transition_scores, seq_lens):
-#     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
-#     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
-#     return dist.entropy
   
   def marginals(self, emission_scores, transition_scores, seq_lens):
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
@@ -283,3 +270,13 @@ class LinearChainCRF(nn.Module):
     all_scores = self.calculate_all_scores(emission_scores, transition_scores)
     dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
     return dist.argmax.max(-1)[0].argmax(-1)
+
+  def rsample2(self, emission_scores, transition_scores, seq_lens, tau):
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
+    dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
+    return dist.gumbel_crf(tau).sum(-1)
+
+  def entropy2(self, emission_scores, transition_scores, seq_lens):
+    all_scores = self.calculate_all_scores(emission_scores, transition_scores)
+    dist = LCRF(all_scores.transpose(3,2), (seq_lens + 1).float())
+    return dist.entropy

@@ -70,7 +70,7 @@ class LatentTemplateCRFAR(nn.Module):
     self.p_copy_g = nn.Linear(config.state_size, 1)
     
     # table_projection
-    self.x_projection = nn.Linear(config.tapas_state_size, config.state_size)
+    self.x_projection = nn.Linear(config.tapas_state_size + config.embedding_size, config.state_size)
 
     # dec z proj
     self.z_logits_attention = Attention(
@@ -100,9 +100,11 @@ class LatentTemplateCRFAR(nn.Module):
     init_state_c = init_state_c.transpose(0, 1).contiguous()
     return (init_state_h, init_state_c)
 
-  def encode_x(self, input_ids, attention_mask, token_type_ids):
-    outputs = self.tapas(input_ids, attention_mask, token_type_ids)
+  def encode_x(self, input_ids, attention_masks, token_type_ids, tables):
+    outputs = self.tapas(input_ids, attention_masks, token_type_ids)
     outputs = outputs.last_hidden_state[:,2:]
+    table_embed = self.embeddings(tables)
+    outputs = torch.cat([outputs, table_embed], dim=-1)
     outputs = self.x_projection(outputs)
     return outputs
 
@@ -180,38 +182,53 @@ class LatentTemplateCRFAR(nn.Module):
     # entropy regularization
     ent_z = self.z_crf.entropy(z_emission_scores, z_transition_scores,
       sent_lens).mean()
+    
+    #e2
+#     ent_z = self.z_crf.entropy2(z_emission_scores, z_transition_scores,
+#       sent_lens).mean()
+    
 #     loss += z_beta * ent_z
 #     out_dict['ent_z'] = tmu.to_np(ent_z)
 #     out_dict['ent_z_loss'] = z_beta * tmu.to_np(ent_z)
-    loss += 0.05  * ent_z
+
+    loss += 0.025  * ent_z
     out_dict['ent_z'] = tmu.to_np(ent_z)
-    out_dict['ent_z_loss'] = 0.05 * tmu.to_np(ent_z)
+    out_dict['ent_z_loss'] = 0.025 * tmu.to_np(ent_z)
     
-    z_sample_ids, z_sample, _ = self.z_crf.rsample(
-        z_emission_scores, z_transition_scores, sent_lens, tau,
-        return_switching=True)
-
-    if bi is not None and bi % 200 == 0:
-        print("batch : " + str(bi), flush=True)
-        print(z_sample_ids[:2])
-        print(zcs[:2, :max_len])
-
-    # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
-    z_sample_ids.masked_fill_(~sent_mask, 0) 
-    z_sample_ids_out = z_sample_ids.masked_fill(~sent_mask, -1)
-    out_dict['z_sample_ids'] = tmu.to_np(z_sample_ids_out)
-
-    # encode table
+     # encode table
     encoded_x = self.encode_x(
       data_dict["x_input_id_lst"],
       data_dict["x_attn_mask_lst"],
       data_dict["x_token_type_id_lst"],
+      data_dict["tables"],
       )
+    
+#     z_sample_ids, z_sample, _ = self.z_crf.rsample(
+#         z_emission_scores, z_transition_scores, sent_lens, tau,
+#         return_switching=True)
+    
+#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+#     z_sample_ids.masked_fill_(~sent_mask, 0) 
 
-    # embed z using the encoded table
-    z_embed = self.embed_z(z_sample_ids, encoded_x)
+#     # embed z using the encoded table
+#     z_embed = self.embed_z(z_sample_ids, encoded_x)
 
-    z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
+#     z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
+    
+    # r2 
+    z_sample = self.z_crf.rsample2(
+        z_emission_scores, z_transition_scores, sent_lens, tau)
+    
+    z_sample_ids = z_sample.argmax(-1)
+    # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+    z_sample_ids.masked_fill_(~sent_mask, 0) 
+    
+    z_sample_emb = torch.bmm(z_sample, encoded_x)
+    
+    if bi is not None and bi % 200 == 0:
+        print("batch : " + str(bi), flush=True)
+        print(z_sample_ids[:2])
+        print(zcs[:2, :max_len])
 
     sentences = sentences[:, :max_len]
     p_log_prob, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
@@ -225,7 +242,7 @@ class LatentTemplateCRFAR(nn.Module):
     out_dict['z_acc'] = z_acc.item()
     loss += p_log_prob
 
-    # # turn maximization to minimization
+    # turn maximization to minimization
     loss = -loss 
 
     out_dict['loss'] = tmu.to_np(loss)
@@ -333,7 +350,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     log_prob_x = log_prob_x.sum() / sent_lens.sum()
     log_prob_z = log_prob_z.sum() / sent_lens.sum()
-    z_beta = 1
+#     z_beta = 1
     log_prob = log_prob_x + z_beta * log_prob_z
 
     # acc 
@@ -352,6 +369,7 @@ class LatentTemplateCRFAR(nn.Module):
       data_dict["x_input_id_lst"],
       data_dict["x_attn_mask_lst"],
       data_dict["x_token_type_id_lst"],
+      data_dict["tables"],
       )
 
     # decoding 

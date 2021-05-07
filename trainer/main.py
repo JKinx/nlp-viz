@@ -83,6 +83,9 @@ def define_argument(config):
   parser.add_argument(
     "--save_temp", type=str2bool, 
     nargs='?', const=True, default=config.save_temp)
+  
+  parser.add_argument(
+    "--grad_accum", default=config.grad_accum, type=int)
 
   # optimization
   parser.add_argument(

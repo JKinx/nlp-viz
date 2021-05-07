@@ -22,6 +22,9 @@ class LatentTemplateCRFARModel(FTModel):
     
     self.tapas_optimizer = AdamW(tapas_params, lr=5e-5)
     self.other_optimizer = Adam(other_params, lr=config.learning_rate)
+    
+    self.grad_accum = config.grad_accum
+    self.iter_count = 0
 
     self.dataset = config.dataset
 
@@ -40,8 +43,11 @@ class LatentTemplateCRFARModel(FTModel):
         data_dict[key] = torch.from_numpy(batch[key]).to(self.device)
       except:
         data_dict[key] = batch[key]
-
-    model.zero_grad()
+    
+    if self.iter_count == 0:
+        self.tapas_optimizer.zero_grad()
+        self.other_optimizer.zero_grad()
+    
     loss, out_dict = model(
       data_dict=data_dict,
       tau=schedule_params['tau'], 
@@ -52,8 +58,13 @@ class LatentTemplateCRFARModel(FTModel):
 
     loss.backward()
     clip_grad_norm_(model.parameters(), self.max_grad_norm)
-    self.tapas_optimizer.step()
-    self.other_optimizer.step()
+    self.iter_count += 1
+    
+    if self.iter_count % self.grad_accum == 0:
+        self.tapas_optimizer.step()
+        self.other_optimizer.step()
+        self.tapas_optimizer.zero_grad()
+        self.other_optimizer.zero_grad()
 
     out_dict['tau'] = schedule_params['tau']
     out_dict['x_lambd'] = schedule_params['x_lambd']
