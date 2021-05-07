@@ -76,7 +76,7 @@ class LatentTemplateCRFAR(nn.Module):
     # dec z proj
     self.z_logits_attention = Attention(
         config.state_size, 
-        config.state_size, 
+        config.tapas_state_size + config.embedding_size, 
         config.state_size)
 
     self.p_z_intermediate = nn.Linear(2 * config.state_size, config.state_size)
@@ -205,27 +205,27 @@ class LatentTemplateCRFAR(nn.Module):
       data_dict["tables"],
       )
     
-#     z_sample_ids, z_sample, _ = self.z_crf.rsample(
-#         z_emission_scores, z_transition_scores, sent_lens, tau,
-#         return_switching=True)
+    z_sample_ids, z_sample, _ = self.z_crf.rsample(
+        z_emission_scores, z_transition_scores, sent_lens, tau,
+        return_switching=True)
     
-#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
-#     z_sample_ids.masked_fill_(~sent_mask, 0) 
-
-#     # embed z using the encoded table
-#     z_embed = self.embed_z(z_sample_ids, encoded_x_raw)
-
-#     z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
-    
-    # r2 
-    z_sample = self.z_crf.rsample2(
-        z_emission_scores, z_transition_scores, sent_lens, tau)
-    
-    z_sample_ids = z_sample.argmax(-1)
     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
     z_sample_ids.masked_fill_(~sent_mask, 0) 
+
+    # embed z using the encoded table
+    z_embed = self.embed_z(z_sample_ids, encoded_x_raw)
+
+    z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
     
-    z_sample_emb = torch.bmm(z_sample, encoded_x_raw)
+    # r2 
+#     z_sample = self.z_crf.rsample2(
+#         z_emission_scores, z_transition_scores, sent_lens, tau)
+    
+#     z_sample_ids = z_sample.argmax(-1)
+#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+#     z_sample_ids.masked_fill_(~sent_mask, 0) 
+    
+#     z_sample_emb = torch.bmm(z_sample, encoded_x_raw)
     
     if bi is not None and bi % 200 == 0:
         print("batch : " + str(bi), flush=True)
@@ -316,7 +316,7 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      _, z_logits = self.z_logits_attention(dec_out, encoded_xs_raw, header_masks)
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
       z_logits = (z_logits + 1e-10).log()
       z_pred.append(z_logits.argmax(dim=-1))
         
@@ -406,7 +406,7 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      _, z_logits = self.z_logits_attention(dec_out, encoded_xs_raw, header_masks)
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
       z_logits = (z_logits + 1e-10).log()
 
       z = z_logits.argmax(-1)
