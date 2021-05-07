@@ -56,7 +56,7 @@ class Config:
         'loss', 
         'tau', 'x_lambd', "z_beta",
         'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
-        'ent_z', 'ent_z_loss', 'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
+        'ent_weight', 'ent_z', 'ent_z_loss', 'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
         ]
 
     # scores to be reported during validation 

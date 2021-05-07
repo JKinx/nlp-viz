@@ -193,7 +193,10 @@ class LatentTemplateCRFAR(nn.Module):
 #     out_dict['ent_z'] = tmu.to_np(ent_z)
 #     out_dict['ent_z_loss'] = z_beta * tmu.to_np(ent_z)
 
-    loss += 0.025  * ent_z
+    ent_weight = 0.025 * (1 - z_beta) + 0.001
+#     ent_weight = 0.025 * z_beta
+    loss += ent_weight * ent_z
+    out_dict['ent_weight'] = ent_weight
     out_dict['ent_z'] = tmu.to_np(ent_z)
     out_dict['ent_z_loss'] = 0.025 * tmu.to_np(ent_z)
     
@@ -205,27 +208,27 @@ class LatentTemplateCRFAR(nn.Module):
       data_dict["tables"],
       )
     
-#     z_sample_ids, z_sample, _ = self.z_crf.rsample(
-#         z_emission_scores, z_transition_scores, sent_lens, tau,
-#         return_switching=True)
+    z_sample_ids, z_sample, _ = self.z_crf.rsample(
+        z_emission_scores, z_transition_scores, sent_lens, tau,
+        return_switching=True)
     
-#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
-#     z_sample_ids.masked_fill_(~sent_mask, 0) 
-
-#     # embed z using the encoded table
-#     z_embed = self.embed_z(z_sample_ids, encoded_x_raw)
-
-#     z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
-    
-    # r2 
-    z_sample = self.z_crf.rsample2(
-        z_emission_scores, z_transition_scores, sent_lens, tau)
-    
-    z_sample_ids = z_sample.argmax(-1)
     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
     z_sample_ids.masked_fill_(~sent_mask, 0) 
+
+    # embed z using the encoded table
+    z_embed = self.embed_z(z_sample_ids, encoded_x_raw)
+
+    z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
     
-    z_sample_emb = torch.bmm(z_sample, encoded_x_raw)
+#     # r2 
+#     z_sample = self.z_crf.rsample2(
+#         z_emission_scores, z_transition_scores, sent_lens, tau)
+    
+#     z_sample_ids = z_sample.argmax(-1)
+#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+#     z_sample_ids.masked_fill_(~sent_mask, 0) 
+    
+#     z_sample_emb = torch.bmm(z_sample, encoded_x_raw)
     
     if bi is not None and bi % 200 == 0:
         print("batch : " + str(bi), flush=True)
