@@ -98,7 +98,7 @@ class LSTMDecoder(nn.Module):
                         dropout=dropout)
 
     self.attention = Attention(
-      config.state_size, config.state_size, config.embedding_size)
+      config.state_size, config.tapas_state_size + config.embedding_size, config.embedding_size)
 
     self.dropout = nn.Dropout(config.dropout)
     self.attn_cont_proj = nn.Linear(

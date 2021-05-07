@@ -59,22 +59,25 @@ class LatentTemplateCRFAR(nn.Module):
 
     # dec 
     self.p_dec_init_state_proj_h = nn.Linear(
-      config.state_size, config.lstm_layers * config.state_size)
+        config.tapas_state_size + config.embedding_size, 
+        config.lstm_layers * config.state_size)
     self.p_dec_init_state_proj_c = nn.Linear(
-      config.state_size, config.lstm_layers * config.state_size)
+        config.tapas_state_size + config.embedding_size, 
+        config.lstm_layers * config.state_size)
     self.p_decoder = LSTMDecoder(config)
 
     # copy 
     self.p_copy_attn = Attention(
-      config.state_size, config.state_size, config.state_size)
+        config.state_size, 
+        config.tapas_state_size + config.embedding_size,
+        config.state_size)
     self.p_copy_g = nn.Linear(config.state_size, 1)
-    
-    # table_projection
-    self.x_projection = nn.Linear(config.tapas_state_size + config.embedding_size, config.state_size)
 
     # dec z proj
     self.z_logits_attention = Attention(
-      config.state_size, config.state_size, config.state_size)
+        config.state_size, 
+        config.state_size, 
+        config.state_size)
 
     self.p_z_intermediate = nn.Linear(2 * config.state_size, config.state_size)
     
@@ -105,8 +108,7 @@ class LatentTemplateCRFAR(nn.Module):
     outputs = outputs.last_hidden_state[:,2:]
     table_embed = self.embeddings(tables)
     outputs = torch.cat([outputs, table_embed], dim=-1)
-    outputs = self.x_projection(outputs)
-    return outputs
+    return outputs, table_embed
 
   def embed_z(self, z_ids, z_embeddings):
     # z_ids : batch_size X seq_len
@@ -196,7 +198,7 @@ class LatentTemplateCRFAR(nn.Module):
     out_dict['ent_z_loss'] = 0.025 * tmu.to_np(ent_z)
     
      # encode table
-    encoded_x = self.encode_x(
+    encoded_x, encoded_x_raw = self.encode_x(
       data_dict["x_input_id_lst"],
       data_dict["x_attn_mask_lst"],
       data_dict["x_token_type_id_lst"],
@@ -211,7 +213,7 @@ class LatentTemplateCRFAR(nn.Module):
 #     z_sample_ids.masked_fill_(~sent_mask, 0) 
 
 #     # embed z using the encoded table
-#     z_embed = self.embed_z(z_sample_ids, encoded_x)
+#     z_embed = self.embed_z(z_sample_ids, encoded_x_raw)
 
 #     z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
     
@@ -223,7 +225,7 @@ class LatentTemplateCRFAR(nn.Module):
     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
     z_sample_ids.masked_fill_(~sent_mask, 0) 
     
-    z_sample_emb = torch.bmm(z_sample, encoded_x)
+    z_sample_emb = torch.bmm(z_sample, encoded_x_raw)
     
     if bi is not None and bi % 200 == 0:
         print("batch : " + str(bi), flush=True)
@@ -233,7 +235,7 @@ class LatentTemplateCRFAR(nn.Module):
     sentences = sentences[:, :max_len]
     p_log_prob, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
       z_sample_ids, z_sample_emb, sent_lens, sentences, data_dict["tables"],
-      x_lambd, encoded_x, data_dict["header_mask_lst"], 
+      x_lambd, encoded_x, encoded_x_raw, data_dict["header_mask_lst"], 
       data_dict["x_mask_lst"], z_beta)
 
     out_dict['p_log_prob'] = p_log_prob.item()
@@ -285,7 +287,7 @@ class LatentTemplateCRFAR(nn.Module):
     return final_inc_loss, final_exc_loss
 
   def decode_train(self, z_sample_ids, z_sample_emb, sent_lens,
-    sentences, tables, x_lambd, encoded_xs, header_masks, x_masks, z_beta):
+    sentences, tables, x_lambd, encoded_xs, encoded_xs_raw, header_masks, x_masks, z_beta):
     device = z_sample_ids.device
     state_size = self.state_size
     batch_size = sentences.size(0)
@@ -314,7 +316,7 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs_raw, header_masks)
       z_logits = (z_logits + 1e-10).log()
       z_pred.append(z_logits.argmax(dim=-1))
         
@@ -350,7 +352,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     log_prob_x = log_prob_x.sum() / sent_lens.sum()
     log_prob_z = log_prob_z.sum() / sent_lens.sum()
-#     z_beta = 1
+    z_beta = 1
     log_prob = log_prob_x + z_beta * log_prob_z
 
     # acc 
@@ -365,7 +367,7 @@ class LatentTemplateCRFAR(nn.Module):
   def infer(self, data_dict):
     out_dict = {}
     
-    encoded_x = self.encode_x(
+    encoded_x, encoded_x_raw = self.encode_x(
       data_dict["x_input_id_lst"],
       data_dict["x_attn_mask_lst"],
       data_dict["x_token_type_id_lst"],
@@ -374,7 +376,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     # decoding 
     predictions_x, predictions_z = self.decode_infer(
-      data_dict["tables"], encoded_x, 
+      data_dict["tables"], encoded_x, encoded_x_raw,
       data_dict["header_mask_lst"],
       data_dict["x_mask_lst"]
       )
@@ -385,7 +387,7 @@ class LatentTemplateCRFAR(nn.Module):
     out_dict['pred_lens'] = tmu.to_np(pred_lens_)
     return out_dict
 
-  def decode_infer(self, tables, encoded_xs, header_masks, x_masks):    
+  def decode_infer(self, tables, encoded_xs, encoded_xs_raw, header_masks, x_masks):    
     batch_size = tables.size(0)
     device = tables.device
 
@@ -404,13 +406,13 @@ class LatentTemplateCRFAR(nn.Module):
       dec_out = dec_out[0]
 
       # predict z 
-      _, z_logits = self.z_logits_attention(dec_out, encoded_xs, header_masks)
+      _, z_logits = self.z_logits_attention(dec_out, encoded_xs_raw, header_masks)
       z_logits = (z_logits + 1e-10).log()
 
       z = z_logits.argmax(-1)
 
       # predict x based on z 
-      z_emb = self.embed_z(z.unsqueeze(-1), encoded_xs)
+      z_emb = self.embed_z(z.unsqueeze(-1), encoded_xs_raw)
       z_emb = z_emb.squeeze(1)
 
       dec_intermediate = self.p_z_intermediate(
