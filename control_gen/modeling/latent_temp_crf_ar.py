@@ -191,8 +191,9 @@ class LatentTemplateCRFAR(nn.Module):
 #     out_dict['ent_z'] = tmu.to_np(ent_z)
 #     out_dict['ent_z_loss'] = z_beta * tmu.to_np(ent_z)
 
-    ent_weight = 0.025 * (1 - z_beta) + 0.001
+#     ent_weight = 0.025 * (1 - z_beta) + 0.001
 #     ent_weight = 0.025 * z_beta
+    ent_weight = 0.025
     loss += ent_weight * ent_z
     out_dict['ent_weight'] = ent_weight
     out_dict['ent_z'] = tmu.to_np(ent_z)
@@ -298,8 +299,11 @@ class LatentTemplateCRFAR(nn.Module):
     max_len = dec_inputs.size(1)
 
     # average of table encoding
-    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
+#     mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+#     mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
+
+    mem_enc = encoded_xs * header_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / header_masks.sum(dim=1, keepdim=True)
 
     state = self.init_state(mem_enc)
     
@@ -311,8 +315,10 @@ class LatentTemplateCRFAR(nn.Module):
     log_prob_x, log_prob_z, dec_outputs, z_pred = [], [], [], []
 
     for i in range(max_len): 
+#       dec_out, state = self.p_decoder(
+#           dec_inputs[i], state, encoded_xs, x_masks)
       dec_out, state = self.p_decoder(
-          dec_inputs[i], state, encoded_xs, x_masks)
+          dec_inputs[i], state, encoded_xs, header_masks)
 
       dec_out = dec_out[0]
 
@@ -353,7 +359,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     log_prob_x = log_prob_x.sum() / sent_lens.sum()
     log_prob_z = log_prob_z.sum() / sent_lens.sum()
-#     z_beta = 1
+    z_beta = 1
     log_prob = log_prob_x + z_beta * log_prob_z
 
     # acc 
@@ -398,12 +404,17 @@ class LatentTemplateCRFAR(nn.Module):
       torch.zeros(batch_size).to(device).long() + self.start_id)
     
     # average of table encoding
-    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
+#     mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+#     mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
+#     state = self.init_state(mem_enc)
+    mem_enc = encoded_xs * header_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / header_masks.sum(dim=1, keepdim=True)
     state = self.init_state(mem_enc)
 
     for i in range(self.max_y_len+1): 
-      dec_out, state = self.p_decoder(inp, state, encoded_xs, x_masks)
+#       dec_out, state = self.p_decoder(inp, state, encoded_xs, x_masks)
+#       dec_out = dec_out[0]
+      dec_out, state = self.p_decoder(inp, state, encoded_xs, header_masks)
       dec_out = dec_out[0]
 
       # predict z 
