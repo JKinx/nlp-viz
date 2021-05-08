@@ -219,11 +219,11 @@ def main():
   config = set_argument(config, args)
   
   # dataset
-  dataset = Dataset(config)
-  dataset.build()
+#   dataset = Dataset(config)
+#   dataset.build()
     
-#   import pickle
-#   pickle.dump(dataset, open("../dynamic_data.pkl", "wb"))
+  import pickle
+  dataset = pickle.load(open("../data/e2e/dynamic_data.pkl", "rb"))
     
   config.vocab_size = dataset.vocab_size
     
