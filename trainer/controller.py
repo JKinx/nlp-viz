@@ -128,10 +128,15 @@ class Controller(object):
     else:
         save_path = self.model_path + 'last'
     print('Saving the model at: %s' % save_path)
+#     torch.save(
+#       {'model_state_dict': model.state_dict(),
+#         'epoch': ei, "config": self.config, "dataset":self._dataset},
+#       save_path)
     torch.save(
       {'model_state_dict': model.state_dict(),
-        'epoch': ei, "config": self.config, "dataset":self._dataset},
+        'epoch': ei, "config": self.config},
       save_path)
+    
     return 
 
   def write_tensorboard(self, out_dict, n_iter, mode, key=None):
