@@ -6,7 +6,7 @@ class Config:
     self.dataset = 'test_dataset'
 
     self.output_path = '../outputs/'
-    self.tensorboard_path = 'tensorboard/'
+    self.tensorboard_path = '../tboard/'
     self.model_path = '../models/'
 
     ## Dataset 
@@ -34,7 +34,7 @@ class Config:
     # general
     self.is_test = False
     self.test_validate = False
-    self.use_tensorboard = False
+    self.use_tensorboard = True
     self.write_full_predictions = False
     self.device = 'cuda'
     self.gpu_id = '0'
