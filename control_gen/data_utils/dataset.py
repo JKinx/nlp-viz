@@ -12,6 +12,7 @@ from . import nlp_pipeline as nlpp
 import pickle
 
 from num2words import num2words
+from copy import deepcopy as dc
 
 def normalize_set(dset, word2id, max_sent_len, max_mem_len, word2id_zcs):
   """Normalize the train/ dev/ test set
@@ -61,18 +62,6 @@ def normalize_kv(data_kvs, word2id, max_mem_len):
 
 def normalize_sent(data_sents, word2id, max_sent_len):
     return nlpp.normalize(data_sents, word2id, max_sent_len, add_start_end=False)
-    
-months = ["january", "february", "march", "april", "may", "june", "july", 
-          "august", "september", "october", "november", "december"]
-days_numerical = [num2words(n).replace("-", " ") for n in range(1, 32)]
-days_ordinal = [num2words(n, ordinal=True).replace("-", " ") 
-                    for n in range(1, 32)]
-days = []
-for day in days_ordinal + days_numerical:
-    days += day.split()
-days = list(set(days))
-
-years = [str(year) for year in range(2000,2021)]
 
 def read_data(dpath):
   """Read the raw e2e data
@@ -90,54 +79,28 @@ def read_data(dpath):
       all characters are changed to lower
   """
   print('reading %s' % dpath)
-  with open(dpath) as fd:
-    reader = csv.reader(fd)
-    lines = [l for l in reader]
-    lines = lines[1:]
-    
+
+  data_raw = pickle.load(open(dpath, "rb"))
+
   dataset = []
-  for l in tqdm(lines):
-    t = l[0].lower().split(', ')
-    t = [(ti.split('[')[0], ti.split('[')[1][:-1]) for ti in t]
-    t_ = []
-    for k, v in t:
+
+  for data_id in range(len(data_raw["xs"])):
+    x = data_raw["xs"][data_id]
+
+    t = []
+    for k in x:
+      v = x[k]
       for i, vi in enumerate(v.split()):
-        t_.append(('_' + k.replace(' ', '_') + '_' + str(i), vi))
-    t = t_
-
-    s = l[1].lower()
-    # Tokenize a string to split off white spaces and punctuations other than 
-    # periods
-    s = word_tokenize(s)
-
-    st = []
-    if "dateSet" in dpath:
-        for w in s:
-            if w in years:
-                st.append("_year_")
-            elif w in months:
-                st.append("_month_")
-            elif w in days:
-                st.append("_day_")
-            else:
-                st.append(w)
-    else:
-        for w in s:
-          in_table = False
-          for k, v in t:
-            if(w == v):
-              st.append(k)
-              in_table = True
-              break
-          if(in_table == False):
-            st.append(w)
-        
-    # z_contraints
-    zc = l[2].split(" ")
+        t.append(('_' + k.replace(' ', '_') + '_' + str(i), vi))
     
-    dataset.append((t, s, st, zc))
+    s = data_raw["ys"][data_id].split(" ")
+
+    zc = data_raw["zs"][data_id].split(" ")
+
+    dataset.append((t, s, dc(s), zc))
   print("%d cases" % len(dataset))
-  return dataset
+  return dataset, data_raw["tapas_input_ids"], data_raw["tapas_attn_mask"], \
+          data_raw["tapas_token_type_ids"], data_raw["y_lengths"]
 
 def prepare_inference(keys, vals, sents, pad_id=0):
   """Prepare the data format for inference
@@ -243,16 +206,17 @@ class Dataset(DatasetBase):
     testset = read_data(self.data_path['test'])
 
     ## build vocabulary 
-    train_sents = [t[1] for t in trainset]
+    train_sents = [t[1] for t in trainset[0]]
     word2id, id2word, _ = nlpp.build_vocab(train_sents, 
       word2id=self.word2id, id2word=self.id2word, vocab_size_threshold=1)
     train_keys = []
     train_vals = []
-    for tb, _, _, _ in trainset:
+    for tb, _, _, _ in trainset[0]:
       keys = [k for k, _ in tb]
       train_keys.extend(keys)
       vals = [v for _, v in tb]
       train_vals.extend(vals)
+
     if "dateSet" in self.data_path["train"]:
         train_keys += ["_day_", "_month_", "_year_"]
     # join key vocab and the word vocab, but keep a seperate key dict
@@ -273,15 +237,15 @@ class Dataset(DatasetBase):
     ## normalize the dataset 
     (train_keys, train_vals, train_mem_lens, train_sentences, train_templates, 
       train_sent_lens, train_zcs) = normalize_set(
-        trainset, self.word2id, max_sent_len, max_mem_len, word2id_zcs)
+        trainset[0], self.word2id, max_sent_len, max_mem_len, word2id_zcs)
     train_bow = [nlpp.sent_to_bow(s, self.max_bow_len) for s in train_sentences]
     (dev_keys, dev_vals, dev_mem_lens, dev_sentences, dev_templates, 
       dev_sent_lens, dev_zcs) = normalize_set(
-        devset, self.word2id, max_sent_len, max_mem_len, word2id_zcs)
+        devset[0], self.word2id, max_sent_len, max_mem_len, word2id_zcs)
     dev_bow = [nlpp.sent_to_bow(s, self.max_bow_len) for s in dev_sentences]
     (test_keys, test_vals, test_mem_lens, test_sentences, test_templates, 
       test_sent_lens, test_zcs) = normalize_set(
-        testset, self.word2id, max_sent_len, max_mem_len, word2id_zcs)
+        testset[0], self.word2id, max_sent_len, max_mem_len, word2id_zcs)
     test_bow = [nlpp.sent_to_bow(s, self.max_bow_len) for s in test_sentences]
     
     print("train_len %i" % len(train_keys))
@@ -305,7 +269,10 @@ class Dataset(DatasetBase):
                         'keys': train_keys,
                         'vals': train_vals,
                         'mem_lens': train_mem_lens,
-                        'zcs' : train_zcs}, 
+                        'zcs' : train_zcs,
+                        't_input_ids' : trainset[1],
+                        't_attn_mask' : trainset[2],
+                        't_token_type_ids' : trainset[3]}, 
                       "dev_casewise": { 
                         'sentences': dev_sentences,
                         'sent_bow': dev_bow, 
@@ -314,13 +281,19 @@ class Dataset(DatasetBase):
                         'keys': dev_keys,
                         'vals': dev_vals,
                         'mem_lens': dev_mem_lens,
-                        'zcs' : dev_zcs}, 
+                        'zcs' : dev_zcs,
+                        't_input_ids' : devset[1],
+                        't_attn_mask' : devset[2],
+                        't_token_type_ids' : devset[3]}, 
                       'dev': {
                         'keys': dev_keys_inf,
                         'vals': dev_vals_inf,
                         'mem_lens': dev_lens_inf, 
                         'references': dev_references,
-                        'zcs' : dev_zcs},
+                        'zcs' : dev_zcs,
+                        't_input_ids' : devset[1],
+                        't_attn_mask' : devset[2],
+                        't_token_type_ids' : devset[3]},
                       "test_casewise": { 
                         'sentences': test_sentences,
                         'sent_bow': test_bow, 
@@ -329,13 +302,19 @@ class Dataset(DatasetBase):
                         'keys': test_keys,
                         'vals': test_vals,
                         'mem_lens': test_mem_lens,
-                        'zcs' : test_zcs},
+                        'zcs' : test_zcs,
+                        't_input_ids' : testset[1],
+                        't_attn_mask' : testset[2],
+                        't_token_type_ids' : testset[3]},
                       'test': {
                         'keys': test_keys_inf,
                         'vals': test_vals_inf,
                         'mem_lens': test_lens_inf, 
                         'references': test_references,
-                        'zcs' : test_zcs}
+                        'zcs' : test_zcs,
+                        't_input_ids' : testset[1],
+                        't_attn_mask' : testset[2],
+                        't_token_type_ids' : testset[3]}
                       }
     return 
 
@@ -365,6 +344,9 @@ class Dataset(DatasetBase):
     vals = self._dataset[setname]['vals'][ptr: ptr + batch_size]
     mem_lens = self._dataset[setname]['mem_lens'][ptr: ptr + batch_size]
     zcs = self._dataset[setname]['zcs'][ptr: ptr + batch_size]
+    t_input_ids = self._dataset[setname]['t_input_ids'][ptr: ptr + batch_size]
+    t_attn_mask = self._dataset[setname]['t_attn_mask'][ptr: ptr + batch_size]
+    t_token_type_ids = self._dataset[setname]['t_token_type_ids'][ptr: ptr + batch_size]
 
     batch = {'sentences': np.array(sentences),
              'sent_bow': np.array(sent_bow),
@@ -373,7 +355,11 @@ class Dataset(DatasetBase):
              'keys': np.array(keys),
              'vals': np.array(vals),
              'mem_lens': np.array(mem_lens),
-             'zcs': np.array(zcs)}
+             'zcs': np.array(zcs),
+             't_input_ids' : np.array(t_input_ids),
+             't_attn_mask' : np.array(t_attn_mask),
+             't_token_type_ids' : np.array(t_token_type_ids)
+             }
     return batch
 
   def next_batch_infer(self, setname, ptr, batch_size):
@@ -382,12 +368,19 @@ class Dataset(DatasetBase):
     mem_lens = self._dataset[setname]['mem_lens'][ptr: ptr + batch_size]
     references = self._dataset[setname]['references'][ptr: ptr + batch_size]
     zcs = self._dataset[setname]['zcs'][ptr: ptr + batch_size]
+    t_input_ids = self._dataset[setname]['t_input_ids'][ptr: ptr + batch_size]
+    t_attn_mask = self._dataset[setname]['t_attn_mask'][ptr: ptr + batch_size]
+    t_token_type_ids = self._dataset[setname]['t_token_type_ids'][ptr: ptr + batch_size]
 
     batch = {'keys': np.array(keys),
              'vals': np.array(vals),
              'mem_lens': np.array(mem_lens), 
              'references': references,
-             'zcs': np.array(zcs)}
+             'zcs': np.array(zcs),
+             't_input_ids' : np.array(t_input_ids),
+             't_attn_mask' : np.array(t_attn_mask),
+             't_token_type_ids' : np.array(t_token_type_ids)
+             }
     return batch
 
   def next_batch(self, setname, batch_size):
@@ -406,32 +399,19 @@ class Dataset(DatasetBase):
       batch['vals']
       batch['mem_lens']
     """
-    ptr = self._ptr[setname]
+    sname = {"train" : "train", "dev":"dev","test":"test",
+            "dev2":"dev", "test2":"test"}
+    ptr = self._ptr[sname[setname]]
 
-    if(self.model_name in ['rnnlm', 'autodecoder']):
-      if(setname == 'train'):
-        batch = self.next_batch_train(setname, ptr, batch_size)
-      else:
-        batch = self.next_batch_train(setname + '_casewise', ptr, batch_size)
-    elif(self.model_name.startswith('latent_temp_crf')):
-      if(setname == 'train'):
-        batch = self.next_batch_train(setname, ptr, batch_size)
-      else:
-        if(self.task == 'density'):
-          batch_c = self.next_batch_train(setname + '_casewise', ptr, batch_size)
-          batch_i = self.next_batch_infer(setname, ptr, batch_size)
-          batch = (batch_c, batch_i)
-        elif(self.task == 'generation'):
-          batch = self.next_batch_infer(setname, ptr, batch_size)
-        else: 
-          raise NotImplementedError(self.task)
-    else: 
-      if(setname == 'train'):
-        batch = self.next_batch_train(setname, ptr, batch_size)
-      else:
-        batch = self.next_batch_infer(setname, ptr, batch_size)
+    if(setname in ['train', 'dev2', 'test2']):
+      sname2 = {"train" : "train", 
+               "dev2":"dev_casewise",
+               "test2":"test_casewise"}  
+      batch = self.next_batch_train(sname2[setname], ptr, batch_size)
+    else:
+      batch = self.next_batch_infer(setname, ptr, batch_size)
     
-    self._update_ptr(setname, batch_size)
+    self._update_ptr(sname[setname], batch_size)
     return batch
 
   def decode_sent(self, sent, sent_len=-1, prob=None, add_eos=True):
@@ -447,62 +427,6 @@ class Dataset(DatasetBase):
       if(prob is not None): s_out.append("(%.3f) " % prob[wi])
     if(add_eos == False): s_out = s_out[:-1]
     return " ".join(s_out)
-
-  def decode_sent_w_state(self, sent, state, sent_len=-1):
-    """Decode the sentence, gather words with the same states"""
-    s_out = ''
-    is_break = False
-    prev_state = -1
-    for wi, wid in enumerate(sent[:sent_len]):
-      # if(is_break): break
-      w = self.id2word[wid]
-      if(w == "_EOS"): break
-      si = state[wi]
-      if(si != prev_state):
-        if(s_out != ''): s_out += ']' + str(prev_state) + ' ' + '['
-        else: s_out += '['
-      else: s_out += ' '
-      s_out += w
-      prev_state = si
-    s_out += ']' + str(prev_state)
-    return s_out
-    
-  def decode_sent_w_adapt_state(self, sent, sent_seg, state, state_len):
-    """Decode the sentence, gather words with the same states
-
-    This implementation also enables us to check if a sentence is ended by EOS 
-    or the end of template by printing out EOS explicitly
-    """
-    s_out = '['
-    is_break = False
-    prev_state = -1
-    k = 0 
-    # print('sent_seg.shape:', sent_seg.shape)
-    for wi, (wid, si) in enumerate(zip(sent, sent_seg)):
-      # if(is_break): break
-      w = self.id2word[wid]
-      s_out += w
-      if(w == "_EOS"): break
-      if(si == 1):
-        s_out += ']' + str(state[k]) 
-        k += 1
-        if(k == state_len): break
-        else: s_out += ' ' + '['
-      else: s_out += ' '
-    
-    if(k != state_len):
-      s_out += ']' + str(state[k])
-    return s_out
-
-  def decode_sent_with_bow(self, sent, bow, bow_prob, sent_len=-1):
-    s_out = ''
-    for w, bow, bp in zip(
-      sent[: sent_len], bow[: sent_len], bow_prob[: sent_len]):
-      s_out += '%s: %s %.3f | %s %.3f | %s %.3f \n' % (self.id2word[w], 
-        self.id2word[bow[0]], bp[0],
-        self.id2word[bow[1]], bp[1],
-        self.id2word[bow[2]], bp[2])
-    return s_out
 
   def post_process_sentence(self, keys, vals, sent):
     """Post processing single sentence"""
@@ -559,4 +483,3 @@ class Dataset(DatasetBase):
             keys_bi, vals_bi, predictions_all[bi][si])
       out_dict['post_predictions_all'] = predictions_all_
     return 
-  

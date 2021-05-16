@@ -19,6 +19,7 @@ from .torch_struct import LinearChainCRF as LC
 
 from .fst import make_fst
 from .beamtree import BeamTree
+from transformers import TapasModel
 
 class LatentTemplateCRFAR(nn.Module):
   """The latent template CRF autoregressive version, table to text setting"""
@@ -61,9 +62,10 @@ class LatentTemplateCRFAR(nn.Module):
     self.z_embeddings = nn.Embedding(
       config.latent_vocab_size, config.embedding_size)
     # enc
-    self.q_encoder = LSTMEncoder(config)
+    self.q_encoder = TapasModel.from_pretrained('google/tapas-base')
+    tapas_state_size = 768
     # latent 
-    self.z_crf_proj = nn.Linear(config.state_size, config.latent_vocab_size)
+    self.z_crf_proj = nn.Linear(tapas_state_size, config.latent_vocab_size)
     self.z_crf = LinearChainCRF(config)
     # dec 
     self.p_dec_init_state_proj_h = nn.Linear(
@@ -84,15 +86,6 @@ class LatentTemplateCRFAR(nn.Module):
     self.pr_inc_lambd = config.pr_inc_lambd
     self.pr_exc_lambd = config.pr_exc_lambd
     self.num_pr_constraints = config.num_pr_constraints
-    
-    # constraints for beam search
-    if "_ndend_" in config.word2id:
-        self.locked_zs = [0,1,2]
-        self.key_ys = {0 : config.word2id["_ndend_"],
-                        1 : config.word2id["_odend_"],
-                        2 : config.word2id["_mend_"]}
-    else:
-        self.locked_zs = []
     return 
 
   def init_state(self, s):
@@ -121,7 +114,7 @@ class LatentTemplateCRFAR(nn.Module):
     return kv_emb, kv_enc, kv_mask
     
   def forward(self, keys, vals, 
-    sentences, sent_lens, sent_full, tau, x_lambd,  return_grad=False, zcs=None):
+    sentences, sent_lens, tau, x_lambd,  return_grad=False, zcs=None, t_input_ids = None, t_attn_mask = None, t_token_type_ids = None):
     """Forward pass, first run the inference network, then run the decoder
     
     Args:
@@ -146,16 +139,15 @@ class LatentTemplateCRFAR(nn.Module):
 
     ## sentence encoding 
     sent_mask = sentences != self.pad_id
-    sentences_emb = self.embeddings(sentences)
-    # enc_outputs.shape = [batch, max_len, state_size]
-    enc_outputs, (enc_state_h, enc_state_c) =\
-      self.q_encoder(sentences_emb, sent_lens)
-    # NOTE: max_len != sentences.size(1), max_len = max(sent_lens)
-    max_len = enc_outputs.size(1)
-    sent_mask = sent_mask[:, : max_len]
 
-    # kv encoding 
-    kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
+    # enc_outputs.shape = [batch, max_len, state_size]
+    outputs = self.q_encoder(input_ids = t_input_ids,
+                             attention_mask = t_attn_mask,
+                             token_type_ids = t_token_type_ids
+                             ).last_hidden_state
+    max_len = sent_lens.max().item()
+    enc_outputs = outputs[:, :max_len]
+    sent_mask = sent_mask[:, :max_len]
 
     ## latent template
     # emission score = log potential
@@ -171,8 +163,8 @@ class LatentTemplateCRFAR(nn.Module):
       out_dict["z_scores"] = z_emission_scores
         
       # get pr loss
-      pr_inc_loss, pr_exc_loss = self.compute_pr(z_emission_scores, zcs[:, :max_len], 
-                                sent_mask, sent_lens)
+      pr_inc_loss, pr_exc_loss = self.compute_pr(z_emission_scores, 
+        zcs[:, :max_len], sent_mask, sent_lens)
       out_dict["pr_inc_val"] = tmu.to_np(pr_inc_loss)
       out_dict["pr_exc_val"] = tmu.to_np(pr_exc_loss)
       out_dict["pr_inc_loss"] = self.pr_inc_lambd * tmu.to_np(pr_inc_loss)
@@ -209,19 +201,13 @@ class LatentTemplateCRFAR(nn.Module):
     inspect['z_sample_ids'] = tmu.to_np(z_sample_ids_out)
     z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids,
       self.z_embeddings, self.gumbel_st)
-
-    # decoding
-    if self.config.dataset == "dateSet":
-        sentences = sent_full
-    elif sent.config.dataset == "e2e":
-        sentences = sentences
-    else:
-        raise NotImplementedError
-        
+    
+    # kv encoding 
+    kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
     sentences = sentences[:, : max_len]
     p_log_prob, _, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
       z_sample_ids, z_sample_emb, sent_lens,
-      keys, kv_emb, kv_enc, kv_mask, sentences, x_lambd)
+      vals, kv_emb, kv_enc, kv_mask, sentences, x_lambd)
     out_dict['p_log_prob'] = p_log_prob.item()
     out_dict['p_log_prob_x'] = p_log_prob_x.item()
     out_dict['p_log_prob_z'] = p_log_prob_z.item()
@@ -229,20 +215,7 @@ class LatentTemplateCRFAR(nn.Module):
     loss += p_log_prob
 
     # # turn maximization to minimization
-    loss = -loss
-
-    if(return_grad):
-      self.zero_grad()
-      g = torch.autograd.grad(
-        loss, z_emission_scores, retain_graph=True)[0]
-      g_mean = g.mean(0)
-      g_std = g.std(0)
-      g_r =\
-        g_std.log() - g_mean.abs().log()
-      out_dict['g_mean'] =\
-        g_mean.abs().log().mean().item()
-      out_dict['g_std'] = g_std.log().mean().item()
-      out_dict['g_r'] = g_r.mean().item()   
+    loss = -loss 
 
     out_dict['loss'] = tmu.to_np(loss)
     out_dict['inspect'] = inspect
@@ -465,7 +438,8 @@ class LatentTemplateCRFAR(nn.Module):
     predictions_z = torch.stack(predictions_z).transpose(1, 0)
     return predictions_x, predictions_z
 
-  def posterior_infer(self, keys, vals, sentences, sent_lens):
+  def posterior_infer(self, keys, vals, sentences, sent_lens, 
+    t_input_ids, t_attn_mask, t_token_type_ids):
     """Find the argmax for z given x and y
     
     Args:
@@ -479,16 +453,14 @@ class LatentTemplateCRFAR(nn.Module):
     """
     device = sentences.device
     loss = 0.
-
-    ## sentence encoding 
-    sent_mask = sentences != self.pad_id
-    sentences_emb = self.embeddings(sentences)
+    
     # enc_outputs.shape = [batch, max_len, state_size]
-    enc_outputs, (enc_state_h, enc_state_c) =\
-      self.q_encoder(sentences_emb, sent_lens)
-    # NOTE: max_len != sentences.size(1), max_len = max(sent_lens)
-    max_len = enc_outputs.size(1)
-    sent_mask = sent_mask[:, : max_len]
+    outputs = self.q_encoder(input_ids = t_input_ids,
+                             attention_mask = t_attn_mask,
+                             token_type_ids = t_token_type_ids
+                             ).last_hidden_state
+    max_len = sent_lens.max().item()
+    enc_outputs = outputs[:, :max_len]
 
     # kv encoding 
     kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
@@ -505,7 +477,8 @@ class LatentTemplateCRFAR(nn.Module):
     out_list = [out[i][:sent_lens[i].item()] for i in range(len(out))]
     return out_list
 
-  def posterior_marginals(self, keys, vals, sentences, sent_lens):
+  def posterior_marginals(self, keys, vals, sentences, sent_lens, 
+    t_input_ids, t_attn_mask, t_token_type_ids):
     """Find the marginals for z given x and y
     
     Args:
@@ -520,15 +493,13 @@ class LatentTemplateCRFAR(nn.Module):
     device = sentences.device
     loss = 0.
 
-    ## sentence encoding 
-    sent_mask = sentences != self.pad_id
-    sentences_emb = self.embeddings(sentences)
     # enc_outputs.shape = [batch, max_len, state_size]
-    enc_outputs, (enc_state_h, enc_state_c) =\
-      self.q_encoder(sentences_emb, sent_lens)
-    # NOTE: max_len != sentences.size(1), max_len = max(sent_lens)
-    max_len = enc_outputs.size(1)
-    sent_mask = sent_mask[:, : max_len]
+    outputs = self.q_encoder(input_ids = t_input_ids,
+                             attention_mask = t_attn_mask,
+                             token_type_ids = t_token_type_ids
+                             ).last_hidden_state
+    max_len = sent_lens.max().item()
+    enc_outputs = outputs[:, :max_len]
 
     # kv encoding 
     kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
