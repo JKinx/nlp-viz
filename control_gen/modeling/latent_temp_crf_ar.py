@@ -438,7 +438,7 @@ class LatentTemplateCRFAR(nn.Module):
     predictions_z = torch.stack(predictions_z).transpose(1, 0)
     return predictions_x, predictions_z
 
-  def posterior_infer(self, keys, vals, sentences, sent_lens, 
+  def posterior_infer(self, sent_lens, 
     t_input_ids, t_attn_mask, t_token_type_ids):
     """Find the argmax for z given x and y
     
@@ -451,7 +451,7 @@ class LatentTemplateCRFAR(nn.Module):
     Returns:
       argmax x for each sample
     """
-    device = sentences.device
+    device = sent_lens.device
     loss = 0.
     
     # enc_outputs.shape = [batch, max_len, state_size]
@@ -461,9 +461,6 @@ class LatentTemplateCRFAR(nn.Module):
                              ).last_hidden_state
     max_len = sent_lens.max().item()
     enc_outputs = outputs[:, :max_len]
-
-    # kv encoding 
-    kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
 
     ## latent template
     # emission score = log potential
