@@ -6,7 +6,7 @@ class Config:
     self.dataset = 'test_dataset'
 
     self.output_path = '../outputs/'
-    self.tensorboard_path = 'tensorboard/'
+    self.tensorboard_path = '../tboard/'
     self.model_path = '../models/'
 
     ## Dataset 
@@ -66,7 +66,7 @@ class Config:
         ]
 
     # validation criteria for different models 
-    self.validation_criteria = 'marginal'
+    self.validation_criteria = 'b2'
 
     # optimization
     self.seperate_optimizer = False
@@ -75,7 +75,7 @@ class Config:
     self.learning_rate = 1e-4
 
     # latent z
-    self.latent_vocab_size = 50
+    self.latent_vocab_size = 20
 
     self.y_beta = 0. # KLD for y 
     self.bow_beta = 0. # BOW KLD/ entropy regularization
@@ -108,7 +108,7 @@ class Config:
     self.pr = False
     self.pr_inc_lambd = None
     self.pr_exc_lambd = None
-    self.num_pr_constraints = 5
+    self.num_pr_constraints = 8
 
     # decoding 
     self.z_pred_strategy = 'greedy'

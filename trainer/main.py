@@ -208,15 +208,13 @@ def set_argument(config, args):
   config.embedding_size = config.state_size
 
   if(config.test_validate): 
-    config.use_tensorboard = False
     config.validate_start_epoch = 0
 
   ## build model saving path 
   model = config.model_name + "_" + config.model_version
   output_path = config.output_path + model 
   model_path = config.model_path + model
-  tensorboard_path = config.tensorboard_path + model + '_'
-  tensorboard_path += datetime.now().strftime("%m.%d.%Y_%H.%M.%S")
+  tensorboard_path = config.tensorboard_path + model
   if(config.is_test == False):
     # Training mode, create directory for storing model and outputs
     print('model path: %s' % model_path)
@@ -241,16 +239,11 @@ def set_argument(config, args):
     else:
       os.mkdir(model_path)
       os.mkdir(output_path)
+      os.mkdir(tensorboard_path)
   else: pass # test mode, do not create any directory 
   config.model_path = model_path + '/'
   config.output_path = output_path + '/'
   config.tensorboard_path = tensorboard_path + '/'
-  
-#   config.data_path = {
-#     'train': config.data_root + config.dataset + '/trainset.csv', 
-#     'dev': config.data_root + config.dataset + '/devset.csv', 
-#     'test': config.data_root + config.dataset + '/testset_w_refs.csv',
-#     }
   
   config.data_path = {
     'train': config.data_root + config.dataset + '/trainset.pkl', 
