@@ -3,11 +3,13 @@ from collections import defaultdict
 class BeamTree():
     "Object class for beam tree"
 
-    def __init__(self, inp, state, mem_emb, mem_mask, mem, template):
+    def __init__(self, inp, state, mem_emb, mem_mask, mem, template,
+                header_mask):
         self.mem_emb = mem_emb
         self.mem_mask = mem_mask
         self.mem = mem
         self.template = template
+        self.header_mask = header_mask
 
         self.init_key = self.get_key([-2], [-2])
         self.inp = {(-2, -2) : inp}
@@ -143,4 +145,3 @@ class BeamTree():
 
     def reverse_key(self, key):
         return list(key[0]), list(key[1])
-        
