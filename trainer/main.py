@@ -155,8 +155,6 @@ def set_argument(config, args):
   ## overwrite the default configuration  
   config.overwrite(args)
   config.embedding_size = config.state_size
-  
-  config.use_tensorboard = False
     
   if(config.test_validate): 
     config.validate_start_epoch = 0
@@ -165,8 +163,8 @@ def set_argument(config, args):
   model = config.model_name + "_" + config.model_version
   output_path = config.output_path + model 
   model_path = config.model_path + model
-  tensorboard_path = config.tensorboard_path + model + '_'
-  tensorboard_path += datetime.now().strftime("%m.%d.%Y_%H.%M.%S")
+  tensorboard_path = config.tensorboard_path + model
+#   tensorboard_path += datetime.now().strftime("%m.%d.%Y_%H.%M.%S")
   if(config.is_test == False):
     # Training mode, create directory for storing model and outputs
     print('model path: %s' % model_path)
@@ -191,6 +189,8 @@ def set_argument(config, args):
     else:
       os.mkdir(model_path)
       os.mkdir(output_path)
+      if(config.use_tensorboard):
+        os.mkdir(tensorboard_path)
   else: pass # test mode, do not create any directory 
   config.model_path = model_path + '/'
   config.output_path = output_path + '/'
@@ -219,11 +219,11 @@ def main():
   config = set_argument(config, args)
   
   # dataset
-  dataset = Dataset(config)
-  dataset.build()
+#   dataset = Dataset(config)
+#   dataset.build()
     
-#   import pickle
-#   pickle.dump(dataset, open("../dynamic_data.pkl", "wb"))
+  import pickle
+  dataset = pickle.load(open("../data/e2e/dynamic_data.pkl", "rb"))
     
   config.vocab_size = dataset.vocab_size
     

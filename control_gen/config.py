@@ -6,7 +6,7 @@ class Config:
     self.dataset = 'test_dataset'
 
     self.output_path = '../outputs/'
-    self.tensorboard_path = 'tensorboard/'
+    self.tensorboard_path = '../tboard/'
     self.model_path = '../models/'
 
     ## Dataset 
@@ -34,7 +34,7 @@ class Config:
     # general
     self.is_test = False
     self.test_validate = False
-    self.use_tensorboard = False
+    self.use_tensorboard = True
     self.write_full_predictions = False
     self.device = 'cuda'
     self.gpu_id = '0'
@@ -54,10 +54,8 @@ class Config:
     # logging info during training 
     self.log_info = [
         'loss', 
-        'tau', 'x_lambd', "z_beta",
-        'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
-        'ent_weight', 'ent_z', 'ent_z_loss', 
-        'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
+        'tau',
+        'p_log_prob'
         ]
 
     # scores to be reported during validation 
@@ -86,7 +84,7 @@ class Config:
     self.tau_anneal_epoch = 40
 
     # anneal word dropout
-    self.x_lambd_start_epoch = 10
+    self.x_lambd_start_epoch = 100
     self.x_lambd_anneal_epoch = 2
     
     # pr 
