@@ -1,3 +1,5 @@
+"""d: Dynamic with z"""
+
 """Latent template CRF, autoregressive version"""
 
 import numpy as np 
@@ -183,17 +185,11 @@ class LatentTemplateCRFAR(nn.Module):
     ent_z = self.z_crf.entropy(z_emission_scores, z_transition_scores,
       sent_lens).mean()
     
-    #e2
+#     #e2
 #     ent_z = self.z_crf.entropy2(z_emission_scores, z_transition_scores,
 #       sent_lens).mean()
     
-#     loss += z_beta * ent_z
-#     out_dict['ent_z'] = tmu.to_np(ent_z)
-#     out_dict['ent_z_loss'] = z_beta * tmu.to_np(ent_z)
-
-#     ent_weight = 0.025 * (1 - z_beta) + 0.001
-#     ent_weight = 0.025 * z_beta
-    ent_weight = 0.025
+    ent_weight = z_beta
     loss += ent_weight * ent_z
     out_dict['ent_weight'] = ent_weight
     out_dict['ent_z'] = tmu.to_np(ent_z)
@@ -266,6 +262,9 @@ class LatentTemplateCRFAR(nn.Module):
     # marginals : [batch, max_len, state_size]
     marginals = dist.marginals.sum(-1)
     rel_marginals = marginals[:, :, :max_num_contraints]
+
+#     rel_marginals = marginals[:, :, 10:max_num_contraints+10]
+#     zcs = zcs - 10
     
     # filters for the constrained z states
     filters = torch.arange(max_num_contraints).view(1,1,max_num_contraints).to(self.device)
@@ -299,11 +298,8 @@ class LatentTemplateCRFAR(nn.Module):
     max_len = dec_inputs.size(1)
 
     # average of table encoding
-#     mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
-#     mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
-
-    mem_enc = encoded_xs * header_masks.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / header_masks.sum(dim=1, keepdim=True)
+    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
 
     state = self.init_state(mem_enc)
     
@@ -315,10 +311,8 @@ class LatentTemplateCRFAR(nn.Module):
     log_prob_x, log_prob_z, dec_outputs, z_pred = [], [], [], []
 
     for i in range(max_len): 
-#       dec_out, state = self.p_decoder(
-#           dec_inputs[i], state, encoded_xs, x_masks)
       dec_out, state = self.p_decoder(
-          dec_inputs[i], state, encoded_xs, header_masks)
+          dec_inputs[i], state, encoded_xs, x_masks)
 
       dec_out = dec_out[0]
 
@@ -404,17 +398,12 @@ class LatentTemplateCRFAR(nn.Module):
       torch.zeros(batch_size).to(device).long() + self.start_id)
     
     # average of table encoding
-#     mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
-#     mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
-#     state = self.init_state(mem_enc)
-    mem_enc = encoded_xs * header_masks.unsqueeze(-1).float()
-    mem_enc = mem_enc.sum(dim=1) / header_masks.sum(dim=1, keepdim=True)
+    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
     state = self.init_state(mem_enc)
 
     for i in range(self.max_y_len+1): 
-#       dec_out, state = self.p_decoder(inp, state, encoded_xs, x_masks)
-#       dec_out = dec_out[0]
-      dec_out, state = self.p_decoder(inp, state, encoded_xs, header_masks)
+      dec_out, state = self.p_decoder(inp, state, encoded_xs, x_masks)
       dec_out = dec_out[0]
 
       # predict z 
@@ -470,6 +459,355 @@ class LatentTemplateCRFAR(nn.Module):
     out_list = [out[i][:sent_lens[i].item()] for i in range(len(out))]
     return out_list
 
+  def infer2(self, data_dict, templates, return_bt =  False):
+    out_dict = {}
+    
+    encoded_x = self.encode_x(
+      data_dict["x_input_id_lst"],
+      data_dict["x_attn_mask_lst"],
+      data_dict["x_token_type_id_lst"],
+      data_dict["tables"],
+      )
+
+
+    # decoding 
+    pred_y, pred_z, pred_score, beam_trees, bts, bid, pw, ps = self.decode_infer2(
+      data_dict["tables"], encoded_x, 
+      data_dict["header_mask_lst"],
+      data_dict["x_mask_lst"],
+      templates, 
+      return_bt)
+
+    out_dict['pred_y'] = pred_y
+    out_dict['pred_z'] = pred_z
+    out_dict['pred_score'] = pred_score
+    out_dict["beam_trees"] = beam_trees
+    out_dict["bts"] = bts
+    out_dict["regex_alignment"] = bid
+    out_dict["pw"] = pw
+    out_dict["ps"] = ps
+    return out_dict
+
+  def decode_infer2(self, tables, encoded_xs, header_masks, x_masks, templates, return_bt):    
+    batch_size = tables.size(0)
+    device = tables.device
+    
+    decoded_batch = []
+    decoded_score = []
+    decoded_states = []
+    decoded_bid = []
+    decoded_pw = []
+    decoded_ps = []
+    beam_trees = []
+    bts = []
+
+
+    predictions_x, predictions_z = [], []
+    inp = self.embeddings(
+      torch.zeros(batch_size).to(self.device).long() + self.start_id)
+
+    mem_enc = encoded_xs * x_masks.unsqueeze(-1).float()
+    mem_enc = mem_enc.sum(dim=1) / x_masks.sum(dim=1, keepdim=True)
+    state = self.init_state(mem_enc)
+    
+    # assume use_src_info=True
+    state = self.init_state(mem_enc)
+
+    mem_emb = encoded_xs
+    mem_mask = x_masks
+    mem = tables
+    
+    beams_batch = []
+    
+    for idx in range(batch_size):
+      inp_i = inp[idx:idx + 1]
+      state_i = (state[0][:, idx:idx + 1, :].contiguous(), state[1][:, idx:idx + 1, :].contiguous())
+      mem_emb_i = mem_emb[idx:idx+1]
+      mem_mask_i = mem_mask[idx:idx+1]
+      mem_i = mem[idx:idx+1]
+    
+      template = templates[idx]
+
+      beam_tree = BeamTree(inp_i, state_i, mem_emb_i, mem_mask_i, mem_i, template, header_masks[idx:idx+1])
+      bs_init = beam_tree.init_bs_init(return_bt)
+    
+      endnodes = self.beam_search(bs_init, beam_tree)
+
+      beam_trees.append(beam_tree)
+      bts.append(beam_tree.get_bt(bs_init))
+
+      utterances_w, utterances_s, scores_result, utterances_b, \
+       utterances_pw, utterances_ps = self.endnodes_to_utterances(
+        endnodes)
+        
+      decoded_batch.append(utterances_w)
+      decoded_states.append(utterances_s)
+      decoded_score.append(scores_result)
+      decoded_bid.append(utterances_b)
+      decoded_pw.append(utterances_pw)
+      decoded_ps.append(utterances_ps)
+    
+    pred_y = []
+    pred_z = []
+    pred_score = []
+    bid = []
+    pw = []
+    ps = []
+    for batch_idx in range(len(decoded_batch)):
+        if decoded_batch[batch_idx] == []:
+            pred_y.append([])
+            pred_z.append([])
+            pred_score.append(-float("inf"))
+            bid([])
+        else:
+#             pred_y.append(decoded_batch[batch_idx][0][1:-1])
+#             pred_z.append(decoded_states[batch_idx][0][1:-1])
+#             pred_score.append(decoded_score[batch_idx][0])
+#             bid.append(decoded_bid[batch_idx][0][1:-1])
+            pred_y.append(decoded_batch[batch_idx][0:15])
+            pred_z.append(decoded_states[batch_idx][0:15])
+            pred_score.append(decoded_score[batch_idx][0:15])
+            bid.append(decoded_bid[batch_idx][0:15])
+            pw.append(decoded_pw[batch_idx][0:15])
+            ps.append(decoded_ps[batch_idx][0:15])
+            
+    return pred_y, pred_z, pred_score, beam_trees, bts, bid, pw, ps
+
+  def init_bst(self, bs_init, beam_tree, fss, mem_emb, mem_mask, mem, header_mask):
+    if bs_init["fs_idx"][0] == 0:
+        node = {'h': bs_init["h"], 'inp': bs_init["inp"], 'prevNode': None, 
+                'word_id': -1, "ys" : bs_init["prev_ys"] + [-1],
+                'state_id': -1, "zs" : bs_init["prev_zs"] + [-1],
+                'logp': bs_init["logp"], 'leng': bs_init["leng"] + 1, 
+                "fs_idx" : 0, "bids" : list(bs_init["fs_idx"][1]),
+                "log_ps" : bs_init["prev_ys"] + [-1],
+                "log_pw" : bs_init["prev_ys"] + [-1]}
+        if bs_init["bt"]:
+          beam_tree.update_node(bs_init, node)
+        fss[0]["nodes"] = [(-node['logp'], node)]
+        return 
+
+  def beam_search(self, bs_init, beam_tree):
+    mem_emb = beam_tree.mem_emb
+    mem_mask = beam_tree.mem_mask
+    header_mask = beam_tree.header_mask
+    mem = beam_tree.mem
+    template = beam_tree.template
+    
+    # beam vars
+    beam_width = 2 # for y
+    beam_w_ = 2 # for z
+    topk = 5
+    #     max_len = self.max_dec_len
+    max_len = 50
+    window_size = 3
+    
+    endnodes = []
+    
+    # initialize fstates
+    fs_dict = make_fst(template, self.config._dataset)
+    num_fs = fs_dict["counter"] + 1
+    fss = fs_dict["fss"]
+  
+    t = 0
+    break_flag = False
+    finished = False
+
+    bt = bs_init["bt"]
+    self.init_bst(bs_init, beam_tree, fss, mem_emb, mem_mask, mem, 
+      header_mask)
+    
+    while not finished:
+      if t>= max_len: break
+      t += 1
+          
+      for fs_idx in range(num_fs):
+        # current state
+        fs = fss[fs_idx]
+        # nodes coming from preceding fsm states
+        prev_nodes = []
+        prev_fstate_count = 0   
+
+        # nodes generated in this step       
+        nextnodes = []
+        
+        # collect nodes
+        for prev_fs in fs["prev"]:
+          prev_fstate_count += 1
+          prev_nodes += fss[prev_fs]["nodes"]
+        prev_nodes = sorted(prev_nodes, key=lambda x: x[0])
+        
+        for elem in range(min(len(prev_nodes), beam_width * prev_fstate_count)):
+          score_top, n_top = prev_nodes[elem]
+          
+          if n_top["word_id"] == self.end_id and n_top["prevNode"] != None:
+            endnodes.append((score, n_top))
+          
+            if len(endnodes) >= number_required:
+              break
+            else:
+              continue
+          
+          # decoder states
+          dec_out, decoder_hidden = self.p_decoder(n_top['inp'].contiguous(), 
+            n_top['h'], mem_emb, mem_mask)
+          dec_out = dec_out[0]
+
+          if bt:
+            beam_tree.update_hidden(n_top, decoder_hidden)
+          
+          _, z_logits = self.z_logits_attention(dec_out, mem_emb, header_mask)
+          z_logits = (z_logits + 1e-10).log()
+
+          z = z_logits.argmax(-1)
+          
+          # shape: bsz X state_vocab
+          state_logp = torch.log_softmax(z_logits, dim=-1)
+          
+          # z is being controlled
+          if fs["yz"] == "z":
+            if fs["type"] == "neg":
+              state_logp[:, fs["val"]] = float("-Inf")
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            elif fs["val"] == -1:
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            else:
+              state_id = fs["val"]
+              log_prob = state_logp[:,state_id:state_id+1]
+              indexes = torch.tensor([[[state_id]]]).to(self.device)
+          # y is being controlled. keep all z
+          else:
+            log_prob, indexes = torch.topk(state_logp, state_logp.shape[1]) 
+
+          for new_k in range(len(indexes.view(-1))):
+            decoded_ts = indexes.view(-1)[new_k]
+            log_ps = log_prob[0][new_k].item()
+              
+            z_emb = self.embed_z(torch.tensor([decoded_ts]).to(self.device).unsqueeze(-1), mem_emb)
+            z_emb = z_emb.squeeze(1)
+            dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
+            x_logits = self.p_decoder.output_proj(dec_intermediate)
+            lm_prob = F.softmax(x_logits, dim=-1)
+              
+            _, copy_dist = self.p_copy_attn(dec_intermediate, mem_emb, mem_mask)
+            copy_prob = tmu.batch_index_put(copy_dist, mem, self.vocab_size)
+            copy_g = torch.sigmoid(self.p_copy_g(dec_intermediate))
+
+            out_prob = (1 - copy_g) * lm_prob + copy_g * copy_prob
+            x_logits = (out_prob + 1e-10).log()
+            
+            # make eos invalid if not exit state
+            if not fs["exit"]:
+              x_logits[:,self.end_id] = float("-Inf")
+              
+            temp_wordlp = torch.log_softmax(x_logits, dim=-1)
+            
+#             print(temp_wordlp[:,self.end_id])
+            
+            if fs["yz"] == "z":
+              # we require the end state to not have any loops and force eos
+              # + ? * not allowed
+              if fs["exit"]:
+                log_prob_w = temp_wordlp[:,self.end_id:self.end_id+1]
+                indexes_w = torch.tensor([[[self.end_id]]]).to(self.device)
+              else:
+                log_prob_w, indexes_w = torch.topk(temp_wordlp, beam_width + window_size)
+            # if y is controlled, force the word
+            else:
+              word_id = fs["val"]
+              log_prob_w = temp_wordlp[:,word_id:word_id+1]
+              indexes_w = torch.tensor([[[word_id]]]).to(self.device)
+            
+            temp_ww = []
+            temp_pp = []  
+              
+            for elem1, elem2 in zip(indexes_w.cpu().view(-1), log_prob_w.cpu().view(-1)):
+              temp_ww.append(elem1)
+              temp_pp.append(elem2)
+
+              if len(temp_ww) >= beam_width:
+                break
+          
+            for new_k_w in range(len(temp_ww)):
+              decoded_tw = temp_ww[new_k_w].view(-1)[0]
+              log_pw = temp_pp[new_k_w].item()
+    
+              inp = z_emb + self.embeddings(torch.tensor([decoded_tw]).to(self.device))
+              
+              word_id = decoded_tw.item()
+              state_id = decoded_ts.item()
+              node = {'h': decoder_hidden, 'inp': inp, 'prevNode': {}, 
+                      'word_id': word_id, 'ys' : n_top["ys"] + [word_id],
+                      'state_id': state_id, 'zs' : n_top["zs"] + [state_id],
+                      'logp': n_top['logp'] + log_ps + log_pw, 
+                      'leng': n_top['leng'] + 1, "fs_idx" : fs_idx,
+                      "bids" : n_top["bids"] + [fs["bid"]],
+                      "log_pw" : n_top["log_pw"] + [log_pw],
+                      "log_ps" : n_top["log_ps"] + [log_ps]}
+                
+              node1 = {'h': decoder_hidden, 'inp': inp, 'prevNode': {}, 
+                      'word_id': word_id, 'ys' : n_top["ys"] + [word_id],
+                      'state_id': state_id, 'zs' : n_top["zs"] + [state_id],
+                      'logp': n_top['logp'] + log_pw, 
+                      'leng': n_top['leng'] + 1, "fs_idx" : fs_idx,
+                      "bids" : n_top["bids"] + [fs["bid"]],
+                      "log_pw" : n_top["log_pw"] + [log_pw],
+                      "log_ps" : n_top["log_ps"] + [log_ps]}
+              
+              node = node1
+    
+              if bt:
+                beam_tree.update_node(bs_init, node)
+
+              score = -node['logp']
+              
+              if node['word_id'] == self.end_id and node['prevNode'] != None:
+                endnodes.append((score, node))
+                continue
+              if node["leng"] >= max_len and fs["exit"]:
+                endnodes.append((score, node))
+                continue
+              else:
+                nextnodes.append((score, node))
+      
+        next_nodes = []
+        for i in range(len(nextnodes)):
+          score, nn_ = nextnodes[i]
+          next_nodes.append((score, nn_))
+
+        next_nodes = sorted(next_nodes, key=lambda x: x[0])
+
+        fss[fs_idx]["next_nodes"] = next_nodes
+          
+      for fs_idx in range(num_fs):
+        fss[fs_idx]["nodes"] = fss[fs_idx]["next_nodes"]
+        
+    return endnodes
+
+  def endnodes_to_utterances(self, endnodes):
+    utterances_w = []
+    utterances_s = []
+    scores_result = []
+    utterances_b = []
+    utterances_pw = []
+    utterances_ps = []
+  
+    for score, n in sorted(endnodes, key=operator.itemgetter(0)):
+      utterance_w = n["ys"][1:]
+      utterance_s = n["zs"][1:]
+      utterance_b = n["bids"][1:] 
+      utterance_pw = n["log_pw"][1:] 
+      utterance_ps = n["log_ps"][1:]
+      utterances_w.append(utterance_w)
+      utterances_s.append(utterance_s)
+      utterances_b.append(utterance_b)
+      utterances_pw.append(utterance_pw)
+      utterances_ps.append(utterance_ps)
+      scores_result.append(score)
+
+    return utterances_w, utterances_s, scores_result, utterances_b, \
+            utterances_pw, utterances_ps
+
   def prepare_dec_io(self, 
     z_sample_ids, z_sample_emb, sentences, x_lambd):
     """Prepare the decoder output g based on the inferred z from the CRF 
@@ -485,6 +823,8 @@ class LatentTemplateCRFAR(nn.Module):
     batch_size = sentences.size(0)
     max_len = sentences.size(1)
     device = sentences.device
+    
+    x_lambd = 0
 
     sent_emb = self.embeddings(sentences)
     z_sample_emb[:, 0] *= 0. # mask out z[0]

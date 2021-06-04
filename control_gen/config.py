@@ -5,8 +5,6 @@ class Config:
     self.model_version = 'test'
     self.dataset = 'test_dataset'
 
-    self.output_path = '../outputs/'
-    self.tensorboard_path = 'tensorboard/'
     self.model_path = '../models/'
 
     ## Dataset 
@@ -33,28 +31,26 @@ class Config:
     ## Controller 
     # general
     self.is_test = False
-    self.test_validate = False
-    self.use_tensorboard = False
-    self.write_full_predictions = False
+    self.test_validate = True
+    self.use_wandb = True
+
     self.device = 'cuda'
-    self.gpu_id = '0'
+    
     self.start_epoch = 0
     self.validate_start_epoch = 0
+    
     self.num_epoch = 30
     self.batch_size_train = 40
     self.batch_size_eval = 50
+    
     self.print_interval = 200 
-    self.load_ckpt = False
-    self.save_ckpt = False # if save checkpoints
-    self.all_pretrained_path = ''
-    self.save_temp = False
     
     self.grad_accum = 1
 
     # logging info during training 
     self.log_info = [
         'loss', 
-        'tau', 'x_lambd', "z_beta",
+        'tau',
         'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
         'ent_weight', 'ent_z', 'ent_z_loss', 
         'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
@@ -73,9 +69,10 @@ class Config:
     # latent z
     self.latent_vocab_size = 50
 
+    
     self.z_beta = 0.01 # entropy regularization 
     
-    self.z_beta_anneal = True
+    self.z_beta_anneal = False
     self.z_beta_init = 0
     self.z_beta_final = 1
     self.z_beta_anneal_epoch = 2
@@ -100,11 +97,11 @@ class Config:
 
     ## model
     # general 
-    self.lstm_layers = 1 # 2 for LM on PTB
+    self.lstm_layers = 1
     self.lstm_bidirectional = True
     self.embedding_size = -1 # the same as state size
-    self.state_size = 300 # 650 for LM on PTB
-    self.dropout = 0.2 # 0.5 for LM on PTB
+    self.state_size = 300
+    self.dropout = 0.2 
     self.tapas_state_size = 768
 
     # latent template

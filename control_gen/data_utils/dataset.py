@@ -135,8 +135,11 @@ class Dataset(DatasetBase):
                     }
     
     for setname in ["train", "dev", "test"]:
-        del self._dataset[setname]["special_tokens"]
-        del self._dataset[setname]["num_special_fields"]
+        try:
+            del self._dataset[setname]["special_tokens"]
+            del self._dataset[setname]["num_special_fields"]
+        except:
+            continue
     
     self._dataset["train"].update({
       "tables" : train_tables,

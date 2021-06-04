@@ -18,6 +18,7 @@ from control_gen.modeling import LatentTemplateCRFARModel
 from control_gen.data_utils import Dataset
 
 import pickle
+import wandb
 
 def str2bool(v):
   if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -53,15 +54,10 @@ def define_argument(config):
     "--test_validate", type=str2bool, 
     nargs='?', const=True, default=config.test_validate)
   parser.add_argument(
-    "--use_tensorboard", type=str2bool, 
-    nargs='?', const=True, default=config.use_tensorboard)
-  parser.add_argument(
-    "--write_full_predictions", type=str2bool, 
-    nargs='?', const=True, default=config.write_full_predictions)
+    "--use_wandb", type=str2bool, 
+    nargs='?', const=True, default=config.use_wandb)
   parser.add_argument(
     "--device", default=config.device, type=str)
-  parser.add_argument(
-    "--gpu_id", default=config.gpu_id, type=str)
   parser.add_argument(
     "--start_epoch", default=config.start_epoch, type=int)
   parser.add_argument(
@@ -77,12 +73,6 @@ def define_argument(config):
     "--batch_size_eval", default=config.batch_size_eval, type=int)
   parser.add_argument(
     "--print_interval", default=config.print_interval, type=int)
-  parser.add_argument(
-    "--save_ckpt", type=str2bool, 
-    nargs='?', const=True, default=config.save_ckpt)
-  parser.add_argument(
-    "--save_temp", type=str2bool, 
-    nargs='?', const=True, default=config.save_temp)
   
   parser.add_argument(
     "--grad_accum", default=config.grad_accum, type=int)
@@ -97,6 +87,10 @@ def define_argument(config):
     "--z_beta_anneal", type=str2bool, 
     nargs='?', const=True, default=config.z_beta_anneal)
   parser.add_argument(
+    "--z_beta_init", default=config.z_beta_init, type=float)
+  parser.add_argument(
+    "--z_beta_final", default=config.z_beta_final, type=float)
+  parser.add_argument(
     "--z_beta_anneal_epoch", type=int, default=config.z_beta_anneal_epoch) 
     
   parser.add_argument(
@@ -108,14 +102,7 @@ def define_argument(config):
   parser.add_argument(
     "--x_lambd_anneal_epoch", default=config.x_lambd_anneal_epoch, type=int)
 
-
   # model 
-  parser.add_argument(
-    "--load_ckpt", type=str2bool, 
-    nargs='?', const=True, default=config.is_test)
-  parser.add_argument(
-    "--all_pretrained_path", type=str, 
-    default=config.all_pretrained_path)
   parser.add_argument(
     "--lstm_layers", default=config.lstm_layers, type=int)
   parser.add_argument(
@@ -161,97 +148,65 @@ def set_argument(config, args):
 
   ## build model saving path 
   model = config.model_name + "_" + config.model_version
-  output_path = config.output_path + model 
   model_path = config.model_path + model
-  tensorboard_path = config.tensorboard_path + model
-#   tensorboard_path += datetime.now().strftime("%m.%d.%Y_%H.%M.%S")
-  if(config.is_test == False):
-    # Training mode, create directory for storing model and outputs
-    print('model path: %s' % model_path)
-    if(os.path.exists(model_path)):
-      print("model %s already existed" % model)
-      print('removing existing cache directories')
-      print('removing %s' % model_path)
-      shutil.rmtree(model_path)
-      os.mkdir(model_path)
-      if(os.path.exists(output_path)): 
-        print('removing %s' % output_path)
-        shutil.rmtree(output_path)
-      os.mkdir(output_path)
-      if(config.use_tensorboard):
-        for p in os.listdir(config.tensorboard_path):
-          if(p.startswith(model)): 
-            try:
-              shutil.rmtree(config.tensorboard_path + p)
-            except:
-              print('cannot remove %s, pass' % (config.tensorboard_path + p))
-        os.mkdir(tensorboard_path)
-    else:
-      os.mkdir(model_path)
-      os.mkdir(output_path)
-      if(config.use_tensorboard):
-        os.mkdir(tensorboard_path)
-  else: pass # test mode, do not create any directory 
+  print('model path: %s' % model_path)
+  if(os.path.exists(model_path)):
+    print("model %s already existed" % model)
+    print('removing existing cache directories')
+    print('removing %s' % model_path)
+    shutil.rmtree(model_path)
+    os.mkdir(model_path)
+  else:
+    os.mkdir(model_path)
+
   config.model_path = model_path + '/'
-  config.output_path = output_path + '/'
-  config.tensorboard_path = tensorboard_path + '/'
   
   config.data_path = {
-    'train': config.data_root + config.dataset + '/trainset_dynamic.pkl', 
-    'dev': config.data_root + config.dataset + '/devset_dynamic.pkl', 
-    'test': config.data_root + config.dataset + '/testset_dynamic.pkl',
+    'train': config.data_root + 'e2e/trainset_dynamic_clean.pkl', 
+    'dev': config.data_root + 'e2e/devset_dynamic_clean.pkl', 
+    'test': config.data_root + 'e2e/testset_dynamic_clean.pkl',
     }
-  
-  config.write_arguments()
-
-  ## set gpu 
-  os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   
-  os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_id
-
-  ## print out the final configuration
-#   config.print_arguments()
+    
+  config.group = model
   return config
 
+wandb_config_list = ["dataset", "batch_size_train", "grad_accum", "learning_rate",\
+                      "z_beta_anneal", "z_beta", "z_beta_init", "z_beta_final", \
+                      "z_beta_anneal_epoch", "pr", "pr_inc_lambd", "pr_exc_lambd"]
 def main():
   # arguments
   config = Config()
   args = define_argument(config)
   config = set_argument(config, args)
+    
+#   config.device = "cpu"
+    
+  for key in wandb_config_list:
+    print(key + " : %s" % (str(config.__dict__[key])), flush=True)
   
-  # dataset
 #   dataset = Dataset(config)
 #   dataset.build()
-    
-  import pickle
-  dataset = pickle.load(open("../data/e2e/dynamic_data.pkl", "rb"))
+#   pickle.dump(dataset, open("../data/e2e/dynamic_data_c.pkl", "wb"))
+#   sdsd
+
+  dataset = pickle.load(open("../data/e2e/" + config.dataset + ".pkl", "rb"))
     
   config.vocab_size = dataset.vocab_size
-    
-  # debug
-  with open(config.output_path + 'id2word.txt', 'w') as fd:
-    for i in dataset.id2word: fd.write('%d %s\n' % (i, dataset.id2word[i]))
+  
+  if config.use_wandb:
+    wandb_config = {}
+    for el in wandb_config_list:
+        wandb_config[el] = config.__dict__[el]
+    wandb.init(project="dynamic", group = config.group, config=wandb_config, reinit=True)
 
   # model 
   model = LatentTemplateCRFARModel(config) 
-#   tmu.print_params(model)
-
+    
   # controller
   controller = Controller(config, model, dataset)
-
-  if(config.is_test == False):
-    if(config.load_ckpt):
-      print('Loading model from: %s' % config.all_pretrained_path)
-      model.load_state_dict(torch.load(config.all_pretrained_path))
-    model.to(config.device)
-    controller.train(model, dataset)
-  else:
-    print('Loading model from: %s' % config.all_pretrained_path)
-    checkpoint = torch.load(config.all_pretrained_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(config.device)
-    ckpt_e = int(config.all_pretrained_path.split('_')[-1][1:])
-    print('restore from checkpoint at epoch %d' % ckpt_e)
-    controller.test_model(model, dataset, ckpt_e)
+  
+  model.to(config.device)
+  controller.train(model, dataset)
   return 
 
 if __name__ == '__main__':

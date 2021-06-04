@@ -18,7 +18,7 @@ import rouge
 from nltk.translate.bleu_score import corpus_bleu
 
 from logger import TrainingLog 
-from tensorboardX import SummaryWriter
+import wandb
 
 import pickle
 
@@ -58,7 +58,6 @@ class Controller(object):
     self.validate_start_epoch = config.validate_start_epoch
     self.print_interval = config.print_interval
     self.model_path = config.model_path
-    self.output_path = config.output_path
     self.device = config.device
     self.batch_size_train = config.batch_size_train
     self.batch_size_eval = config.batch_size_eval
@@ -88,9 +87,7 @@ class Controller(object):
     self.test_validate = config.test_validate
 
     self.config = config
-    self.use_tensorboard = config.use_tensorboard
-    self.write_full = config.write_full_predictions
-#     self.save_ckpt = config.save_ckpt
+    self.use_wandb = config.use_wandb
     self.save_ckpt = True
 
     self.schedule_params = dict()
@@ -99,11 +96,6 @@ class Controller(object):
 
     # logging 
     self.logger = TrainingLog(config) 
-    if(self.use_tensorboard and (self.is_test == False)):
-      print('writting tensorboard at:\n  %s' % config.tensorboard_path)
-      self.tensorboard_writer = SummaryWriter(config.tensorboard_path)
-    else: 
-      self.tensorboard_writer = None
 
     # evaluate
     self.evaluator = rouge.Rouge(
@@ -122,31 +114,22 @@ class Controller(object):
 
   def save(self, model, ei, end=False):
     """Save the model after epoch"""
-#     save_path = self.model_path + 'ckpt_e%d' % ei
     if not end:
         save_path = self.model_path + 'best'
     else:
         save_path = self.model_path + 'last'
     print('Saving the model at: %s' % save_path)
-#     torch.save(
-#       {'model_state_dict': model.state_dict(),
-#         'epoch': ei, "config": self.config, "dataset":self._dataset},
-#       save_path)
     torch.save(
       {'model_state_dict': model.state_dict(),
         'epoch': ei, "config": self.config},
       save_path)
     return 
 
-  def write_tensorboard(self, out_dict, n_iter, mode, key=None):
-    if(key is None):
-      for metrics in out_dict:
-        if(metrics in self.logger.log):
-          self.tensorboard_writer.add_scalar('%s/' % mode + metrics, 
-            out_dict[metrics], n_iter)
-    else:
-      self.tensorboard_writer.add_scalar('%s/' % mode + key, 
-        out_dict[key], n_iter)
+  def write_wandb(self, out_dict):
+    log = {}
+    for metric in self.logger.log:
+        log["train_" + metric] = out_dict[metric]
+    wandb.log(log)
     return
 
   def train_schedule_init(self, num_batches, start_epoch, num_epoch):
@@ -188,11 +171,8 @@ class Controller(object):
         self.schedule_params['z_beta'] = self.z_beta
 
     if(ei >= self.x_lambd_start_epoch):
-      self.x_lambd_iter += 1
-      self.schedule_params['x_lambd'] = 1 - \
-        self.x_lambd_iter * self.schedule_params['x_lambd_decrease_interval']
-#       self.schedule_params['x_lambd'] -=\
-#         self.schedule_params['x_lambd_decrease_interval']
+      self.schedule_params['x_lambd'] -=\
+        self.schedule_params['x_lambd_decrease_interval']
       if(self.schedule_params['x_lambd'] < 0.): 
         self.schedule_params['x_lambd'] = 0.
     return 
@@ -225,13 +205,10 @@ class Controller(object):
         self.scheduler_step(n_iter, ei, bi)
         out_dict = model.train_step(batch, n_iter, ei, bi, self.schedule_params)
         self.logger.update(out_dict)
-        if(self.use_tensorboard):
-          self.write_tensorboard(out_dict, n_iter, 'train')
-        if(self.template_manager is not None):
-          self.template_manager.add_batch(batch, out_dict)
-
+        if(self.use_wandb):
+          self.write_wandb(out_dict)
+        
         if(bi % self.print_interval == 0): 
-
           print(
             '\nmodel %s %s epoch %d/%d batch %d/%d n_iter %d time %ds time per batch %.2fs' % 
             (self.model_name, self.model_version, 
@@ -239,7 +216,6 @@ class Controller(object):
               (time() - epoch_start_time) / (bi + 1)))
           # print the average metrics starting from current epoch 
           self.logger.print()
-#           tmu.print_grad(model) 
 
         if(bi % (self.print_interval // 5) == 0):
           print('.', end=' ', flush=True)
@@ -247,7 +223,7 @@ class Controller(object):
         # start with a validation
         if(bi == 2 and ei == 0 and self.test_validate): 
           _, scores = self.validate(
-            model, dataset, -1, n_iter, 'dev', self.tensorboard_writer) 
+            model, dataset, -1, n_iter, 'dev') 
           pprint(scores)
 
       # after epoch 
@@ -262,7 +238,7 @@ class Controller(object):
           self.template_manager.save(ei)
 
         validation_criteria, validation_scores = self.validate(
-          model, dataset, ei, n_iter, 'dev', self.tensorboard_writer)
+          model, dataset, ei, n_iter, 'dev')
 
         if(validation_criteria > best_validation):
           print(
@@ -287,7 +263,7 @@ class Controller(object):
         print('----------------------------------------------------------------')
         print()
         _, test_scores = self.validate(
-          model, dataset, ei, n_iter, 'test', self.tensorboard_writer)
+          model, dataset, ei, n_iter, 'test')
         print('test scores:')
         pprint(test_scores)
       else: 
@@ -299,7 +275,7 @@ class Controller(object):
     return
 
   def validate(self, model, dataset, ei, n_iter, 
-    mode='dev', tensorboard_writer=None):
+    mode='dev'):
     """
     Args:
       mode: 'dev' or 'test'
@@ -309,13 +285,6 @@ class Controller(object):
     print('Model %s_%s, epoch %d, n_iter %d, validation on %s set ..' % 
       (self.model_name, self.model_version, ei, n_iter, mode))
     model.eval()
-
-    fd = open(self.output_path +\
-      self.model_name + '_' + mode + '_epoch_%d.txt' % ei, 'w')
-    if(self.write_full):
-      fd_full = open(self.output_path +\
-        self.model_name + '_' + mode + '_epoch_%d_full.txt' % ei, 'w')
-    else: fd_full = None
 
     num_batches = dataset.num_batches(mode, self.batch_size_eval)
 
@@ -355,9 +324,6 @@ class Controller(object):
 
       if(bi % 20 == 0): 
         print('.', end=' ', flush=True)
-      
-    fd.close()
-    if(self.write_full): fd_full.close()
 
     for n in scores: 
       if(len(scores[n]) != 0): scores[n] = float(np.average(scores[n]))
@@ -376,12 +342,13 @@ class Controller(object):
         scores_['i' + k] = 0.9 * scores[k] - 0.1 * scores_['self_' + k]
         del scores_[k]
       scores.update(scores_)
-
-
-    if(tensorboard_writer is not None):
+    
+    if self.use_wandb:
       for n in scores:
+        log = {}
         if(isinstance(scores[n], float)):
-          tensorboard_writer.add_scalar(mode + '/' + n, scores[n], n_iter)
+          log[mode + "_" + n] = scores[n]
+          wandb.log(log)
 
     print('validation finished, time: %.2f' % (time() - start_time))
 
@@ -471,9 +438,6 @@ class Controller(object):
 
   def test_model(self, model, dataset, ckpt_e):
     """Test the model on the dev and test dataset"""
-    if(self.model_name == 'latent_temp_crf'):
-      self.template_manager.load(ckpt_e)
-
     num_batches = dataset.num_batches('train', self.batch_size)
     self.train_schedule_init(num_batches, self.start_epoch, self.num_epoch)
     n_iter = (ckpt_e + 1) * num_batches

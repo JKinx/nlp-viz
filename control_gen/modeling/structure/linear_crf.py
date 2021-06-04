@@ -46,6 +46,7 @@ class LinearChainCRF(nn.Module):
     seq_len = emission_scores.size(1)
 
     # scores[batch, t, C, C] = log_potential(t, from y_{t-1}, to y_t)
+    
     scores = transition_scores.view(batch_size, 1, label_size, label_size)\
       .expand(batch_size, seq_len, label_size, label_size) + \
       emission_scores.view(batch_size, seq_len, 1, label_size)\

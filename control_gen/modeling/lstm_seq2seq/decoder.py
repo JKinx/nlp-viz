@@ -128,3 +128,72 @@ class LSTMDecoder(nn.Module):
 
     out = self.dropout(out)
     return out, state
+
+class LSTMDecoder2(nn.Module):
+  """The attentive LSTM decoder"""
+
+  def __init__(self, config, mi_dec=False):
+    super(LSTMDecoder2, self).__init__()
+
+    self.state_size = config.state_size
+    self.attn_entropy = 0.0
+    self.device = config.device
+    self.vocab_size = config.vocab_size
+    self.pad_id = config.pad_id
+    self.start_id = config.start_id
+    self.max_dec_len = config.max_y_len + 1
+
+    if(config.lstm_layers == 1): dropout = 0.
+    else: dropout = config.dropout
+
+    self.cell_z = nn.LSTM(input_size=config.embedding_size, 
+                        hidden_size=self.state_size,
+                        num_layers=config.lstm_layers,
+                        dropout=dropout)
+    
+    self.cell_x = nn.LSTM(input_size=config.embedding_size, 
+                        hidden_size=self.state_size,
+                        num_layers=config.lstm_layers,
+                        dropout=dropout)
+
+    self.attention_z = Attention(
+      config.state_size, config.state_size, config.embedding_size)
+    
+    self.attention_x = Attention(
+      config.state_size, config.state_size, config.embedding_size)
+
+    self.dropout = nn.Dropout(config.dropout)
+    self.attn_cont_proj = nn.Linear(
+      2 * config.embedding_size, config.embedding_size)
+    self.output_proj = nn.Linear(self.state_size, config.vocab_size)
+    return 
+
+  def forward(self, inp, state, zx, memory=None, mem_mask=None):
+    """
+    Args: 
+      state = (h, c)
+        h: type = torch.tensor(Float)
+           shape = [num_layers, batch, hidden_state]
+        c: type = torch.tensor(Float)
+           shape = [num_layers, batch, hidden_state]
+    """
+    inp = self.dropout(inp)
+    device = inp.device
+    query = state[0][0] # use the bottom layer output as query, as in GNMT
+    context_vec = None
+    if(memory is not None):
+      if zx == "z":
+        context_vec, attn_dist = self.attention_z(query, memory, mem_mask)
+      if zx == "x":
+        context_vec, attn_dist = self.attention_x(query, memory, mem_mask)
+
+    if(context_vec is not None):
+      inp = self.attn_cont_proj(torch.cat([inp, context_vec], dim=1))
+    
+    if zx == "z":
+        out, state = self.cell_z(inp.unsqueeze(0), state)
+    elif zx == "x":
+        out, state = self.cell_x(inp.unsqueeze(0), state)
+
+    out = self.dropout(out)
+    return out, state
