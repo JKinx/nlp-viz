@@ -22,6 +22,9 @@ class LatentTemplateCRFARModel(FTModel):
     
     self.q_optimizer = AdamW(q_encoder_params, lr=5e-5)
     self.other_optimizer = Adam(other_params, lr=config.learning_rate)
+    
+    self.grad_accum = config.grad_accum
+    self.iter_count = 0
 
     self.dataset = config.dataset
 
@@ -36,7 +39,10 @@ class LatentTemplateCRFARModel(FTModel):
     model = self.model
     sentences = torch.from_numpy(batch['sentences']).to(self.device)
 
-    model.zero_grad()
+    if self.iter_count == 0:
+        self.q_optimizer.zero_grad()
+        self.other_optimizer.zero_grad()
+        
     loss, out_dict = model(
       keys=torch.from_numpy(batch['keys']).to(self.device),
       vals=torch.from_numpy(batch['vals']).to(self.device),
@@ -48,13 +54,19 @@ class LatentTemplateCRFARModel(FTModel):
       zcs=torch.from_numpy(batch['zcs']).to(self.device),
       t_input_ids = torch.from_numpy(batch['t_input_ids']).to(self.device),
       t_attn_mask = torch.from_numpy(batch['t_attn_mask']).to(self.device),
-      t_token_type_ids = torch.from_numpy(batch['t_token_type_ids']).to(self.device)
+      t_token_type_ids = torch.from_numpy(batch['t_token_type_ids']).to(self.device),
+      bi = bi
       )
 
     loss.backward()
     clip_grad_norm_(model.parameters(), self.max_grad_norm)
-    self.q_optimizer.step()
-    self.other_optimizer.step()
+    self.iter_count += 1
+    
+    if self.iter_count % self.grad_accum == 0:
+        self.q_optimizer.step()
+        self.other_optimizer.step()
+        self.q_optimizer.zero_grad()
+        self.other_optimizer.zero_grad()
 
     out_dict['tau'] = schedule_params['tau']
     out_dict['x_lambd'] = schedule_params['x_lambd']

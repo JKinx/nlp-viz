@@ -6,7 +6,6 @@ class Config:
     self.dataset = 'test_dataset'
 
     self.output_path = '../outputs/'
-    self.tensorboard_path = '../tboard/'
     self.model_path = '../models/'
 
     ## Dataset 
@@ -35,17 +34,20 @@ class Config:
     ## Controller 
     # general
     self.is_test = False
-    self.test_validate = False
-    self.use_tensorboard = True
+    self.test_validate = True
+    self.use_wandb = True
     self.write_full_predictions = False
     self.device = 'cuda'
     self.gpu_id = '0'
     self.start_epoch = 0
-    self.validate_start_epoch = 8
-    self.num_epoch = 30
-    self.batch_size_train = 500
+    self.validate_start_epoch = 0
+    self.num_epoch = 20
+    self.batch_size_train = 100
+    self.grad_accum = 1
+    
     self.batch_size_eval = 100
     self.print_interval = 200 
+    
     self.load_ckpt = False
     self.save_ckpt = False # if save checkpoints
     self.all_pretrained_path = ''
@@ -54,15 +56,14 @@ class Config:
     # logging info during training 
     self.log_info = [
         'loss', 
-        'tau', 'x_lambd', 'z_sample_max',
+        'tau', 'x_lambd', 
         'p_log_prob', 'p_log_prob_x', 'p_log_prob_z', 'z_acc',  
-        'ent_z', 'ent_z_loss', 'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
+        'ent_weight', 'ent_z', 'ent_z_loss', 
+        'pr_inc_val', 'pr_inc_loss', 'pr_exc_val', 'pr_exc_loss'
         ]
 
     # scores to be reported during validation 
     self.validation_scores = [
-        'ent_z', 'elbo', 'marginal', 'p_log_prob', 'z_sample_log_prob', 'ppl', 
-        'p_log_prob_x', 'p_log_prob_z', 'z_acc'
         ]
 
     # validation criteria for different models 
@@ -83,7 +84,7 @@ class Config:
     self.bow_gamma = 1.0 # stepwise bow loss
 
     self.z_lambd = 1.0 # learning signal scaling
-    self.z_beta = 0.01 # entropy regularization 
+    self.z_beta = 0.001 # entropy regularization 
     self.z_overlap_logits = False # if overlap the z logits
     self.z_lambd_supervised = 1.0 # supervised loss for z 
     self.gumbel_st = True # if use gumbel-straight through estimator 
@@ -101,8 +102,8 @@ class Config:
     self.use_src_info = True
 
     # anneal word dropout
-    self.x_lambd_start_epoch = 10
-    self.x_lambd_anneal_epoch = 2
+    self.x_lambd_start_epoch = 0
+    self.x_lambd_anneal_epoch = 10
     
     # pr 
     self.pr = False

@@ -1,4 +1,4 @@
-"""Latent template CRF, autoregressive version"""
+"""Tapas: Latent template CRF, autoregressive version"""
 
 import numpy as np 
 
@@ -114,7 +114,7 @@ class LatentTemplateCRFAR(nn.Module):
     return kv_emb, kv_enc, kv_mask
     
   def forward(self, keys, vals, 
-    sentences, sent_lens, tau, x_lambd,  return_grad=False, zcs=None, t_input_ids = None, t_attn_mask = None, t_token_type_ids = None):
+    sentences, sent_lens, tau, x_lambd,  return_grad=False, zcs=None, t_input_ids = None, t_attn_mask = None, t_token_type_ids = None, bi=None):
     """Forward pass, first run the inference network, then run the decoder
     
     Args:
@@ -132,34 +132,90 @@ class LatentTemplateCRFAR(nn.Module):
       out_dict['inspect']: dict(), training process inspection
     """
     out_dict = {}
-    inspect = {}
     batch_size = sentences.size(0)
     device = sentences.device
     loss = 0.
 
     ## sentence encoding 
     sent_mask = sentences != self.pad_id
+
+    # enc_outputs.shape = [batch, max_len, state_size]
+    outputs = self.q_encoder(input_ids = t_input_ids,
+                             attention_mask = t_attn_mask,
+                             token_type_ids = t_token_type_ids
+                             ).last_hidden_state
     max_len = sent_lens.max().item()
+    enc_outputs = outputs[:, :max_len]
     sent_mask = sent_mask[:, :max_len]
+
+    ## latent template
+    # emission score = log potential
+    # [batch, max_len, latent_vocab]
+    z_emission_scores = self.z_crf_proj(enc_outputs) 
+    if(self.z_overlap_logits):
+      z_emission_scores[:, :-1] += z_emission_scores[:, 1:].clone()
+      z_emission_scores[:, 1:] += z_emission_scores[:, :-1].clone()
+        
+    # PR
+    if self.pr:
+      # get pr loss
+      pr_inc_loss, pr_exc_loss = self.compute_pr(z_emission_scores, 
+        zcs[:, :max_len], sent_mask, sent_lens)
+      out_dict["pr_inc_val"] = tmu.to_np(pr_inc_loss)
+      out_dict["pr_exc_val"] = tmu.to_np(pr_exc_loss)
+      out_dict["pr_inc_loss"] = self.pr_inc_lambd * tmu.to_np(pr_inc_loss)
+      out_dict["pr_exc_loss"] = self.pr_exc_lambd * tmu.to_np(pr_exc_loss)
+      loss -= self.pr_inc_lambd * pr_inc_loss + self.pr_exc_lambd * pr_exc_loss
+        
+    
+    # entropy regularization
+    out_dict['ent_weight'] = self.z_beta
+    ent_z = self.z_crf.entropy(z_emission_scores, sent_lens).mean()
+    loss += self.z_beta * ent_z
+    out_dict['ent_z'] = tmu.to_np(ent_z)
+    out_dict['ent_z_loss'] = self.z_beta * tmu.to_np(ent_z)
+
+    # reparameterized sampling
+    if(self.z_sample_method == 'gumbel_ffbs'):
+      z_sample_ids, z_sample, _ = self.z_crf.rsample(
+        z_emission_scores, sent_lens, tau, return_switching=True)
+    elif(self.z_sample_method == 'pm'):
+      z_sample_ids, z_sample = self.z_crf.pmsample(
+        z_emission_scores, sent_lens, tau)
+    else:
+      raise NotImplementedError(
+        'z_sample_method %s not implemented!' % self.z_sample_method)
+    
+    if bi is not None and bi % 200 == 0:
+        print("batch : " + str(bi), flush=True)
+        print(zcs[:2, :max_len], flush=True)
+        print(z_sample_ids[:2], flush=True)
+
+    z_sample_max, _ = z_sample.max(dim=-1)
+    z_sample_max = z_sample_max.masked_fill(~sent_mask, 0)
+
+    # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+    z_sample_ids.masked_fill_(~sent_mask, 0) 
+    z_sample_ids_out = z_sample_ids.masked_fill(~sent_mask, -1)
+    z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids,
+      self.z_embeddings, self.gumbel_st)
     
     # kv encoding 
     kv_emb, kv_enc, kv_mask = self.encode_kv(keys, vals)
     sentences = sentences[:, : max_len]
-
-    z_sample_ids = torch.zeros(sentences.shape).to(device).long()
-    z_sample_emb = torch.zeros(sentences.shape[0], sentences.shape[1], self.embedding_size).to(device)
-
-    p_log_prob = self.decode_train(
+    p_log_prob, _, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
       z_sample_ids, z_sample_emb, sent_lens,
       vals, kv_emb, kv_enc, kv_mask, sentences, x_lambd)
     out_dict['p_log_prob'] = p_log_prob.item()
+    out_dict['p_log_prob_x'] = p_log_prob_x.item()
+    out_dict['p_log_prob_z'] = p_log_prob_z.item()
+    out_dict['z_acc'] = z_acc.item()
     loss += p_log_prob
 
     # # turn maximization to minimization
     loss = -loss 
 
     out_dict['loss'] = tmu.to_np(loss)
-    out_dict['inspect'] = inspect
     return loss, out_dict
 
   def compute_pr(self, emission_scores, zcs, sent_mask, sent_lens):
@@ -233,6 +289,13 @@ class LatentTemplateCRFAR(nn.Module):
           dec_inputs[i], state)
       dec_out = dec_out[0]
 
+      # predict z 
+      z_logits = self.p_z_proj(dec_out)
+      z_pred.append(z_logits.argmax(dim=-1))
+      log_prob_z_i = -F.cross_entropy(
+        z_logits, dec_targets_z[i], reduction='none')
+      log_prob_z.append(log_prob_z_i)
+
       # predict x based on z 
       dec_intermediate = self.p_z_intermediate(
         torch.cat([dec_out, z_sample_emb[i]], dim=1))
@@ -256,10 +319,25 @@ class LatentTemplateCRFAR(nn.Module):
     # loss
     log_prob_x = torch.stack(log_prob_x).transpose(1, 0) # [B, T]
     log_prob_x = tmu.mask_by_length(log_prob_x, sent_lens)
+    log_prob_z = torch.stack(log_prob_z).transpose(1, 0)
+    log_prob_z = tmu.mask_by_length(log_prob_z, sent_lens)
+    log_prob_step = log_prob_x + log_prob_z # stepwise reward
+
+    log_prob_x_casewise = log_prob_x.sum(1)
     log_prob_x = log_prob_x.sum() / sent_lens.sum()
-    log_prob = log_prob_x
+    log_prob_z_casewise = log_prob_z.sum(1)
+    log_prob_z = log_prob_z.sum() / sent_lens.sum()
+    log_prob_casewise = log_prob_x_casewise + log_prob_z_casewise
+    log_prob = log_prob_x + log_prob_z
+
+    # acc 
+    z_pred = torch.stack(z_pred).transpose(1, 0) # [B, T]
+    dec_targets_z = dec_targets_z.transpose(1, 0)
+    z_positive = tmu.mask_by_length(z_pred == dec_targets_z, sent_lens).sum() 
+    z_acc = z_positive / sent_lens.sum()
     
-    return log_prob
+    return (
+      log_prob, log_prob_casewise, log_prob_x, log_prob_z, z_acc, log_prob_step)
 
   def infer(self, keys, vals):
     """Latent template inference step
@@ -316,10 +394,18 @@ class LatentTemplateCRFAR(nn.Module):
       # assume use_src_info=True
       dec_out, state = self.p_decoder(inp, state, mem_emb, mem_mask)
       dec_out = dec_out[0]
-    
-      z = torch.zeros(batch_size).to(device)
-      z_emb = torch.zeros(batch_size,self.embedding_size).to(device)
 
+      # predict z 
+      z_logits = self.p_z_proj(dec_out)
+      if(self.z_pred_strategy == 'greedy'):
+        z = z_logits.argmax(-1)
+      elif(self.z_pred_strategy == 'sampling'):
+        pass # TBC
+      else: raise NotImplementedError(
+        'Error z decode strategy %s' % self.z_pred_strategy)
+
+      # predict x based on z 
+      z_emb = self.z_embeddings(z)
       dec_intermediate = self.p_z_intermediate(
         torch.cat([dec_out, z_emb], dim=1))
       x_logits = self.p_decoder.output_proj(dec_intermediate)
@@ -601,11 +687,17 @@ class LatentTemplateCRFAR(nn.Module):
     dec_out, decoder_hidden = self.p_decoder(inp, h, mem_emb, mem_mask)
     dec_out = dec_out[0]
 
+    z_logits = self.p_z_proj(dec_out)
 
-    log_ps = 0
+    # shape: bsz X state_vocab
+    state_logp = torch.log_softmax(z_logits, dim=-1)
 
-    z_emb = torch.zeros(1,self.embedding_size).to(device)
-
+    # get the chosen z
+    state_id = bs_init["z_id"]
+    log_ps = state_logp[0,state_id].item()
+      
+    z_emb = self.z_embeddings(torch.tensor([state_id]).to(self.device))
+    dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
     x_logits = self.p_decoder.output_proj(dec_intermediate)
     lm_prob = F.softmax(x_logits, dim=-1)
       
@@ -703,15 +795,32 @@ class LatentTemplateCRFAR(nn.Module):
 
           if bt:
             beam_tree.update_hidden(n_top, decoder_hidden)
-
-          indexes = torch.tensor([[[0]]]).to(self.device)
+          
+          z_logits = self.p_z_proj(dec_out)
+          
+          # shape: bsz X state_vocab
+          state_logp = torch.log_softmax(z_logits, dim=-1)
+          
+          # z is being controlled
+          if fs["yz"] == "z":
+            if fs["type"] == "neg":
+              state_logp[:, fs["val"]] = float("-Inf")
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            elif fs["val"] == -1:
+              log_prob, indexes = torch.topk(state_logp, beam_w_)
+            else:
+              state_id = fs["val"]
+              log_prob = state_logp[:,state_id:state_id+1]
+              indexes = torch.tensor([[[state_id]]]).to(self.device)
+          # y is being controlled. keep all z
+          else:
+            log_prob, indexes = torch.topk(state_logp, state_logp.shape[1]) 
 
           for new_k in range(len(indexes.view(-1))):
             decoded_ts = indexes.view(-1)[new_k]
-            log_ps = 0
-
-            z_emb = torch.zeros(1,self.embedding_size).to(self.device)
-            
+            log_ps = log_prob[0][new_k].item()
+              
+            z_emb = self.z_embeddings(torch.tensor([decoded_ts]).to(self.device))
             dec_intermediate = self.p_z_intermediate(torch.cat([dec_out, z_emb], dim=1))
             x_logits = self.p_decoder.output_proj(dec_intermediate)
             lm_prob = F.softmax(x_logits, dim=-1)
@@ -830,7 +939,7 @@ class LatentTemplateCRFAR(nn.Module):
     device = sentences.device
     
     x_lambd = 0
-
+    
     sent_emb = self.embeddings(sentences)
     z_sample_emb[:, 0] *= 0. # mask out z[0]
 

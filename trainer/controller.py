@@ -18,8 +18,7 @@ import rouge
 from nltk.translate.bleu_score import corpus_bleu
 
 from logger import TrainingLog 
-from template_manager import TemplateManager
-from tensorboardX import SummaryWriter
+import wandb
 
 import pickle
 
@@ -87,7 +86,7 @@ class Controller(object):
     self.test_validate = config.test_validate
 
     self.config = config
-    self.use_tensorboard = config.use_tensorboard
+    self.use_wandb = config.use_wandb
     self.write_full = config.write_full_predictions
 #     self.save_ckpt = config.save_ckpt
     self.save_ckpt = True
@@ -95,17 +94,10 @@ class Controller(object):
     self.schedule_params = dict()
 
     # template manager
-    if(self.model_name.startswith('latent_temp') and config.save_temp):
-      self.template_manager = TemplateManager(config, dataset.id2word)
-    else: self.template_manager = None
+    self.template_manager = None
 
     # logging 
     self.logger = TrainingLog(config) 
-    if(self.use_tensorboard and (self.is_test == False)):
-      print('writting tensorboard at:\n  %s' % config.tensorboard_path)
-      self.tensorboard_writer = SummaryWriter(config.tensorboard_path)
-    else: 
-      self.tensorboard_writer = None
 
     # evaluate
     self.evaluator = rouge.Rouge(
@@ -136,15 +128,11 @@ class Controller(object):
       save_path)
     return 
 
-  def write_tensorboard(self, out_dict, n_iter, mode, key=None):
-    if(key is None):
-      for metrics in out_dict:
-        if(metrics in self.logger.log):
-          self.tensorboard_writer.add_scalar('%s/' % mode + metrics, 
-            out_dict[metrics], n_iter)
-    else:
-      self.tensorboard_writer.add_scalar('%s/' % mode + key, 
-        out_dict[key], n_iter)
+  def write_wandb(self, out_dict):
+    log = {}
+    for metric in self.logger.log:
+        log["train_" + metric] = out_dict[metric]
+    wandb.log(log)
     return
 
   def train_schedule_init(self, num_batches, start_epoch, num_epoch):
@@ -205,10 +193,8 @@ class Controller(object):
         self.scheduler_step(n_iter, ei, bi)
         out_dict = model.train_step(batch, n_iter, ei, bi, self.schedule_params)
         self.logger.update(out_dict)
-        if(self.use_tensorboard):
-          self.write_tensorboard(out_dict, n_iter, 'train')
-        if(self.template_manager is not None):
-          self.template_manager.add_batch(batch, out_dict)
+        if(self.use_wandb):
+          self.write_wandb(out_dict)
 
         if(bi % self.print_interval == 0): 
 
@@ -223,12 +209,6 @@ class Controller(object):
 
         if(bi % (self.print_interval // 5) == 0):
           print('.', end=' ', flush=True)
-        
-        # start with a validation
-        if(bi == 2 and ei == 0 and self.test_validate): 
-          _, scores = self.validate(
-            model, dataset, -1, n_iter, 'dev', self.tensorboard_writer) 
-          pprint(scores)
 
       # after epoch 
       print('model %s %s epoch %d finished, time: %d' % 
@@ -242,7 +222,7 @@ class Controller(object):
           self.template_manager.save(ei)
 
         validation_criteria, validation_scores = self.validate(
-          model, dataset, ei, n_iter, 'dev', self.tensorboard_writer)
+          model, dataset, ei, n_iter, 'dev')
 
         if(validation_criteria > best_validation):
           print(
@@ -267,7 +247,7 @@ class Controller(object):
         print('----------------------------------------------------------------')
         print()
         _, test_scores = self.validate(
-          model, dataset, ei, n_iter, 'test', self.tensorboard_writer)
+          model, dataset, ei, n_iter, 'test')
         print('test scores:')
         pprint(test_scores)
       else: 
@@ -279,7 +259,7 @@ class Controller(object):
     return
 
   def validate(self, model, dataset, ei, n_iter, 
-    mode='dev', tensorboard_writer=None):
+    mode='dev'):
     """
     Args:
       mode: 'dev' or 'test'
@@ -358,10 +338,12 @@ class Controller(object):
       scores.update(scores_)
 
 
-    if(tensorboard_writer is not None):
+    if self.use_wandb:
       for n in scores:
+        log = {}
         if(isinstance(scores[n], float)):
-          tensorboard_writer.add_scalar(mode + '/' + n, scores[n], n_iter)
+          log[mode + "_" + n] = scores[n]
+          wandb.log(log)
 
     print('validation finished, time: %.2f' % (time() - start_time))
 
