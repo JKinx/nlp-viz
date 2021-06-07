@@ -89,6 +89,8 @@ class LatentTemplateCRFAR(nn.Module):
     # crf_attn
     self.crf_y_header = nn.Linear(config.tapas_state_size, config.tapas_state_size)
     self.crf_header_self = nn.Linear(config.tapas_state_size, config.tapas_state_size)
+    
+    self.num_bi = 0
     return 
 
   def init_state(self, s):
@@ -145,6 +147,12 @@ class LatentTemplateCRFAR(nn.Module):
     return header_self, y_header
     
   def forward(self, data_dict, tau, x_lambd, z_beta, bi=None):
+    self.num_bi += 1
+    
+    if self.num_bi > 836:
+        self.pr_inc_lambd = 1
+        self.pr_exc_lambd = 0.1
+        
     out_dict = {}
 
     sentences = data_dict["sentences"]
@@ -190,7 +198,10 @@ class LatentTemplateCRFAR(nn.Module):
 #     ent_z = self.z_crf.entropy2(z_emission_scores, z_transition_scores,
 #       sent_lens).mean()
     
-    ent_weight = z_beta
+    if self.num_bi < 836:
+        ent_weight = z_beta
+    else:
+        ent_weight = 0.001
     loss += ent_weight * ent_z
     out_dict['ent_weight'] = ent_weight
     out_dict['ent_z'] = tmu.to_np(ent_z)
