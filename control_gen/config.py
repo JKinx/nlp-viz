@@ -68,6 +68,8 @@ class Config:
 
     # latent z
     self.latent_vocab_size = 50
+    
+    self.num_z_samples = 1
 
     
     self.z_beta = 0.01 # entropy regularization 

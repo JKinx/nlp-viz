@@ -45,6 +45,9 @@ def define_argument(config):
     "--max_x_len", default=config.max_x_len, type=int)
   parser.add_argument(
     "--max_y_len", default=config.max_y_len, type=int)
+  
+  parser.add_argument(
+    "--num_z_samples", default=config.num_z_samples, type=int)
 
   # train
   parser.add_argument(
@@ -172,7 +175,7 @@ def set_argument(config, args):
 
 wandb_config_list = ["dataset", "batch_size_train", "grad_accum", "learning_rate",\
                       "z_beta_anneal", "z_beta", "z_beta_init", "z_beta_final", \
-                      "z_beta_anneal_epoch", "pr", "pr_inc_lambd", "pr_exc_lambd"]
+                      "z_beta_anneal_epoch", "pr", "pr_inc_lambd", "pr_exc_lambd", "num_z_samples"]
 def main():
   # arguments
   config = Config()

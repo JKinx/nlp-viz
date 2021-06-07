@@ -220,11 +220,11 @@ class Controller(object):
         if(bi % (self.print_interval // 5) == 0):
           print('.', end=' ', flush=True)
         
-        # start with a validation
-        if(bi == 2 and ei == 0 and self.test_validate): 
-          _, scores = self.validate(
-            model, dataset, -1, n_iter, 'dev') 
-          pprint(scores)
+#         # start with a validation
+#         if(bi == 2 and ei == 0 and self.test_validate): 
+#           _, scores = self.validate(
+#             model, dataset, -1, n_iter, 'dev') 
+#           pprint(scores)
 
       # after epoch 
       print('model %s %s epoch %d finished, time: %d' % 

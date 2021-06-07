@@ -58,6 +58,7 @@ class LatentTemplateCRFAR(nn.Module):
 
     # latent 
     self.z_crf = LinearChainCRF(config)
+    self.num_z_samples = config.num_z_samples
 
     # dec 
     self.p_dec_init_state_proj_h = nn.Linear(
@@ -203,44 +204,51 @@ class LatentTemplateCRFAR(nn.Module):
       data_dict["tables"],
       )
     
-    z_sample_ids, z_sample, _ = self.z_crf.rsample(
-        z_emission_scores, z_transition_scores, sent_lens, tau,
-        return_switching=True)
-    
-    # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
-    z_sample_ids.masked_fill_(~sent_mask, 0) 
-
-    # embed z using the encoded table
-    z_embed = self.embed_z(z_sample_ids, encoded_x)
-
-    z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
-    
-#     # r2 
-#     z_sample = self.z_crf.rsample2(
-#         z_emission_scores, z_transition_scores, sent_lens, tau)
-    
-#     z_sample_ids = z_sample.argmax(-1)
-#     # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
-#     z_sample_ids.masked_fill_(~sent_mask, 0) 
-    
-#     z_sample_emb = torch.bmm(z_sample, encoded_x)
-    
+    p_log_probs = 0
+    p_log_prob_xs = 0
+    p_log_prob_zs = 0
+    z_accs = 0
     if bi is not None and bi % 200 == 0:
         print("batch : " + str(bi), flush=True)
-        print(z_sample_ids[:2])
-        print(zcs[:2, :max_len])
+        print(zcs[:2, :max_len], flush=True)
+        
+    for si in range(self.num_z_samples):
+        z_sample_ids, z_sample, _ = self.z_crf.rsample(
+            z_emission_scores, z_transition_scores, sent_lens, tau,
+            return_switching=True)
 
-    sentences = sentences[:, :max_len]
-    p_log_prob, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
-      z_sample_ids, z_sample_emb, sent_lens, sentences, data_dict["tables"],
-      x_lambd, encoded_x, data_dict["header_mask_lst"], 
-      data_dict["x_mask_lst"], z_beta)
+        # NOTE: although we use 0 as mask here, 0 is ALSO a valid state 
+        z_sample_ids.masked_fill_(~sent_mask, 0) 
 
-    out_dict['p_log_prob'] = p_log_prob.item()
-    out_dict['p_log_prob_x'] = p_log_prob_x.item()
-    out_dict['p_log_prob_z'] = p_log_prob_z.item()
-    out_dict['z_acc'] = z_acc.item()
-    loss += p_log_prob
+        # embed z using the encoded table
+        z_embed = self.embed_z(z_sample_ids, encoded_x)
+
+        z_sample_emb = tmu.seq_gumbel_encode(z_sample, z_sample_ids, z_embed)
+
+        if bi is not None and bi % 200 == 0:
+            print(z_sample_ids[:2], flush=True)
+
+        sentences = sentences[:, :max_len]
+        p_log_prob, p_log_prob_x, p_log_prob_z, z_acc, _ = self.decode_train(
+          z_sample_ids, z_sample_emb, sent_lens, sentences, data_dict["tables"],
+          x_lambd, encoded_x, data_dict["header_mask_lst"], 
+          data_dict["x_mask_lst"], z_beta)
+        
+        p_log_probs +=  p_log_prob
+        p_log_prob_xs += p_log_prob_x
+        p_log_prob_zs += p_log_prob_z
+        z_accs += z_acc
+        
+    p_log_probs /= self.num_z_samples
+    p_log_prob_xs /= self.num_z_samples
+    p_log_prob_zs /= self.num_z_samples
+    z_accs /= self.num_z_samples
+
+    out_dict['p_log_prob'] = p_log_probs.item()
+    out_dict['p_log_prob_x'] = p_log_prob_xs.item()
+    out_dict['p_log_prob_z'] = p_log_prob_zs.item()
+    out_dict['z_acc'] = z_accs.item()
+    loss += p_log_probs
 
     # turn maximization to minimization
     loss = -loss 
