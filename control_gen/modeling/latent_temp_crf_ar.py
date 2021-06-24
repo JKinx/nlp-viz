@@ -775,7 +775,7 @@ class LatentTemplateCRFAR(nn.Module):
     beam_w_ = 2 # for z
     topk = 5
     #     max_len = self.max_dec_len
-    max_len = 24
+    max_len = 18
     window_size = 3
     
     endnodes = []
